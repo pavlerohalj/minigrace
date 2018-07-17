@@ -442,6 +442,7 @@ method gctAsString(gctDict) {
     return ret
 }
 
+var opTree := list [ ]
 var methodtypes := list [ ]
 def typeVisitor = object {
     inherit ast.baseVisitor
@@ -449,6 +450,7 @@ def typeVisitor = object {
 
     method visitIdentifier(ident) {
         methodtypes.push("& {ident.value}")
+        opTree.push("I {ident.value}")
         return false
     }
 
@@ -501,25 +503,28 @@ def typeVisitor = object {
         if ((op.value=="&") || (op.value=="|")) then {
             def leftkind = op.left.kind
             def rightkind = op.right.kind
-            if { leftkind=="typeliteral" } then {
+
+            opTree.push(op.value)
+
+            if ((leftkind=="identifier") || (leftkind=="member")) then {
+                var typeIdent := op.left.toGrace(0)
+                opTree.push("{typeIdent}")
+            } elseif { leftkind=="typeliteral" } then {
                 literalCount := literalCount + 1
-                methodtypes.push("{op.value} {literalCount}")
+                opTree.push("{literalCount}")
                 visitTypeLiteral(op.left)
             } elseif { leftkind=="op" } then {
                 visitOp(op.left)
-            } else {
-                var typeIdent := op.left.toGrace(0)
-                methodtypes.push("{op.value} {typeIdent}")
             }
-            if { rightkind=="typeliteral" } then {
+            if ((rightkind=="identifier") || (rightkind=="member")) then {
+                var typeIdent := op.right.toGrace(0)
+                opTree.push("{typeIdent}")
+            } elseif { rightkind=="typeliteral" } then {
                 literalCount := literalCount + 1
-                methodtypes.push("{op.value} {literalCount}")
+                opTree.push("{literalCount}")
                 visitTypeLiteral(op.right)
             } elseif { rightkind=="op" } then {
                 visitOp(op.right)
-            } else {
-                var typeIdent := op.right.toGrace(0)
-                methodtypes.push("{op.value} {typeIdent}")
             }
         }
         return false
@@ -606,6 +611,7 @@ method buildGctFor(module) {
                 meths.add(v.nameString)
                 types.push(v.nameWithParams)
                 methodtypes := list [ ]
+                opTree := list [ ]
                 v.value.accept(typeVisitor)
                 gct.at "methodtypes-of:{v.nameWithParams}" put(methodtypes)
             } else {
