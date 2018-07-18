@@ -449,8 +449,7 @@ def typeVisitor = object {
     var literalCount := 1
 
     method visitIdentifier(ident) {
-        methodtypes.push("& {ident.value}")
-        opTree.push("I {ident.value}")
+        opTree.add("{ident.value}")
         return false
     }
 
