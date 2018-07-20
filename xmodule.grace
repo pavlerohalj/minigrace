@@ -604,9 +604,9 @@ method buildGctFor(module) {
                   if (impGct.containsKey("publicMethodTypes")) then {
                       impMeths := impGct.at "publicMethodTypes"
                       for(impMeths.indices) do { i : Number →
-                          var read : String := "1 " // Number to indicate a method signature
-                          var unread : String := impMeths.at(i)
-                          var param : Number := unread.indexOf ":"
+                          var read:String := "999 " // Number to indicate a method signature
+                          var unread:String := impMeths.at(i)
+                          var param:Number := unread.indexOf ":"
 
                           while {param > 0} do {
                               var comma : Number
@@ -656,7 +656,7 @@ method buildGctFor(module) {
                   }
 
 
-                  gct.at "methodtypes-of:{v.nameString}" put(impMeths)
+                  gct.at "methodtypes-of:{v.nameString}" put (impMeths)
               } else {
                   confidentials.push(v.nameString)
               }
