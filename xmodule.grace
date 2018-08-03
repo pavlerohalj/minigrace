@@ -581,13 +581,13 @@ method buildGctFor(module) {
     def gct = emptyDictionary
     def classes = emptyList
     def confidentials = emptyList
-    def meths = set.empty    // this must be a set, because the same name may be added
+    def publics = set.empty    // this must be a set, because the same name may be added
         // from a module.parent's providedNames, and a body node that is a method.
     def types = emptyList
     def publicMethodTypes = emptyList
     def theDialect = module.theDialect.moduleName
     module.parentsDo { p ->
-        meths.addAll(p.providedNames)       // add inherited and used methods
+        publics.addAll(p.providedNames)      // add inherited and used methods
     }
 
     //Set of prelude types; used when writing the type definition of imported
@@ -607,7 +607,7 @@ method buildGctFor(module) {
                                         parseGCT(v.path) sourceDir(util.outDir)
 
               if (v.isPublic) then {
-                  meths.push("{v.nameString}")
+                  publics.add(v.nameString)
                   def gctType = if (false != v.dtype) then {v.dtype.toGrace 0} else {"Unknown"}
                   publicMethodTypes.push("{v.nameString} → {gctType}")
 
@@ -680,7 +680,7 @@ method buildGctFor(module) {
               for (unresolvedTypes) do { typeName:String →
                   if (impGct.containsKey "methodtypes-of:{typeName}") then {
 
-                      meths.add "{v.nameString}.{typeName}"
+                      publics.add "{v.nameString}.{typeName}"
                       types.add "{v.nameString}.{typeName}"
 
                       def typeDef = impGct.at "methodtypes-of:{typeName}"
@@ -748,9 +748,9 @@ method buildGctFor(module) {
             def gctType = if (false != v.dtype) then {v.dtype.toGrace(0)} else {"Unknown"}
             def varRead: String = "{v.name.value} → {gctType}"
             if (v.isReadable) then {
-                meths.add(v.name.value)
-                publicMethodTypes.push(varRead)
-                gct.at("publicMethod:{v.name.value}") put(list[varRead])
+                publics.add(v.name.value)
+                publicMethodTypes.add(varRead)
+                gct.at "publicMethod:{v.name.value}" put(list[varRead])
             } else {
                 confidentials.push(v.name.value)
             }
@@ -758,7 +758,7 @@ method buildGctFor(module) {
             def varWrite: String = "{v.name.value}:=({v.name.value}': " ++
                                                             "{gctType}) → Done"
             if (v.isWritable) then {
-                meths.add(v.name.value ++ ":=(1)")
+                publics.add(v.name.value ++ ":=(1)")
                 publicMethodTypes.push(varWrite)
                 gct.at("publicMethod:{v.name.value}:=(1)") put(list[varWrite])
             } else {
@@ -766,25 +766,24 @@ method buildGctFor(module) {
             }
         } elseif {v.kind == "method"} then {
             if (v.isPublic) then {
-                meths.add(v.nameString)
-                publicMethodTypes.push(generateMethodHeader(v))
+                publics.add(v.nameString)
+                def methType = ast.methodTypeNode.new(v.signature, v.dtype).toGrace(0)
+                gct.at "publicMethod:{v.nameString}" put(list[methType])
             } else {
                 confidentials.push(v.nameString)
             }
         } elseif {v.kind == "typedec"} then {
             if (v.isPublic) then {
-                meths.add(v.nameString)
+                publics.add(v.nameString)
+                var typename := v.name.toGrace 0
                 types.add(v.nameWithParams)
-                //methodtypes := list [ ]
-                //opTree := list [ ]
-                //v.value.accept(typeVisitor)
-                gct.at "methodtypes-of:{v.nameWithParams}" put (methodtypes.sort ++ opTree)
+                gct.at ("methodtypes-of:{v.nameWithParams}") put(list[v.value.toGrace 0])
             } else {
                 confidentials.push(v.nameString)
             }
         } elseif {v.kind == "defdec"} then {
             if (v.isPublic) then {
-                meths.add(v.nameString)
+                publics.add(v.nameString)
                 def gctType = if (false != v.dtype) then {v.dtype.toGrace(0)} else {"Unknown"}
                 publicMethodTypes.push("{v.name.value} → {gctType}")
                 gct.at("publicMethod:{v.name.value}") put (list["{v.name.value} → {gctType}"])
@@ -792,9 +791,7 @@ method buildGctFor(module) {
                 confidentials.push(v.nameString)
             }
             if (ast.findAnnotation(v, "parent")) then {
-                v.scope.elements.keysDo { m ->
-                    meths.add(m)
-                }
+                v.scope.elements.keysDo { m -> publics.add(m) }
             }
             if (v.returnsObject) then {
                 def ob = v.returnedObjectScope.node
@@ -832,7 +829,7 @@ method buildGctFor(module) {
     } else {
         io.realpath(p)
     } ]
-    gct.at "public" put(list.withAll(meths).sort)
+    gct.at "public" put(list.withAll(publics).sort)
     gct.at "publicMethodTypes" put(publicMethodTypes.sort)
     gct.at "types" put(types.sort)
     gct.at "dialect" put (
