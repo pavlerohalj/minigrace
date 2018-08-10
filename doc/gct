@@ -1,0 +1,107 @@
+The gct file generated for grace programs contains a variety of headers, which
+are explained here, with examples where helpful.
+
+Header : "dialect"
+    Simply holds whichever dialect the module uses.
+
+Header : "path"
+    Holds the file path location of the module
+
+Header : "modules"
+    Holds all the modules available to the module, including those it imports
+
+Header : "types"
+    Holds the names of all the public types from this module. Includes types
+    from publicly imported modules. Note that the type names do not hold their
+    type parameters if they are generic types, and that types coming from
+    publicly imported modules have their import name prepended in front of their
+    own name.
+    As an example, there is a program im1.grace. This program consists only of
+    the line
+        type T = Number
+    Its gct file would have this types section:
+        types:
+         T
+    We also have a program importer.grace. This program looks like this:
+        import "im1" as im1
+        type T = String
+    The gct file for importer.grace would have this types section:
+        types:
+         T
+    If importer.grace is instead written like this:
+        import "im1" as im1 is public
+        type T = String
+    then its gct becomes
+        types:
+         im1.T
+         T
+    The nickname of the imported module is prepended to the type it contains so
+    that the two type T's can be differentiated.
+
+Header : "typedec-of:{typeName}"
+    Each entry in the 'types' header has its own 'typedec-of' header that holds
+    its (nearly) original type declaration in grace code. The difference between
+    the typedec stored in the gct and the original typedec is that types
+    referenced in the typedec of a type that is being publicly imported from
+    another module need to have that modules import name prepended to them. This
+    avoids naming conflicts that could arise in certain situations. Here is an
+    example using the above im1.grace and importer.grace.
+    If im1.grace is now written as this:
+        type T = Number
+        type U = T
+    its gct file would have the sections:
+        typedec-of:T:
+         type T = Number
+        typedec-of:U:
+         type U = T
+    If our program importer.grace is written as:
+        import "im1" as im1 is public
+        type T = String
+    its gct file would have the sections:
+        typedec-of:im1.T:
+         type im1.T = Number
+        typedec-of:im1.U:
+         type im1.U = im1.T
+        typedec-of:T:
+         type T = String
+    Note how in the typedec-of:U header, the reference to type T was replaced
+    with a reference to im1.T, to maintain that im1's type U refers to im1's
+    type T, not importer's type T. References to prelude types like Number or
+    String are not replaced in this way, as they can be seen from any module.
+
+Header : "publicMethodTypes"
+    Holds the method signatures of all publicly accessible methods from this
+    module and from any others that it imports publicly.
+
+Header : "publicMethod:{methNameString}"
+    There is one 'publicMethod' header for every entry in the
+    'publicMethodTypes' list. Breaking up these entries into separate headers
+    made it easier to use the lexer and parser on multi-line method signatures,
+    such as ones that have type literals as type annotations on parameters. This
+    header holds much the same information as the 'publicMethodTypes' header,
+    with the exception that the method allowing access to any publicly imported
+    modules will exist in publicMethodTypes, but will not have a 'publicMethod'
+    entry.
+
+Header : "public"
+    Holds all publicly accessible types and method signatures.
+
+Header : "confidential"
+    Holds all confidential type and method information. This confidential
+    information is needed for inheriting from a class within an imported module.
+
+Header : "fresh-methods"
+    Holds the nameStrings of any methods that construct objects.
+
+Header : "fresh:{fresh-method nameString}"
+    There is one 'fresh:{freshMeth nameString}' header for each entry in
+    'fresh-methods'. This header holds the nameStrings of all methods belonging
+    to the object that this fresh-method creates.
+
+Header : "classes"
+    Holds the names of defs that return objects.
+
+Header : "constructors-of:{defname}"
+    There is one 'constructors-of:' header for each entry in the 'classes'
+    header. This header holds all the constructors in the def that construct
+    objects of the same type.
