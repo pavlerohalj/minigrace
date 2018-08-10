@@ -442,107 +442,68 @@ method gctAsString(gctDict) {
     return ret
 }
 
-//var opTree : List⟦String⟧ := list[]
-//var methodtypes : String := ""
-def typeVisitor = object {
+// Comb through an AstNode to prepend the import nickname to any type references
+// that are not prelude types.
+//
+// When importing a file with the nickname 'impName', we need to prepend
+// 'impName' to references to any type 'T' that are accessible in our import but
+// are only accessible to us as 'impName.T'. These type references are saved as
+// identifier nodes inside an Ast tree created from the type declarations and
+// method types saved in the gct file.
+class importVisitor(impName : String) → ast.AstVisitor {
     inherit ast.baseVisitor
-    var literalCount := 1
 
-    method visitTypeDec(typeDec) {
-        //methodTypes := typeDec.toGrace
+    // Special case where we also want to prepend impName to the name of the
+    // type definition as well as any type parameters it may have.
+    method visitTypeDec(typeDec:ast.AstNode) → Boolean {
+        //typeDec.name is a identifierBinding, so we need to manually prepend
+        //impName here
+        typeDec.name.name := "{impName}.{typeDec.nameString}"
+
+        prependToTypeParam(typeDec)
+        true
     }
 
-    method visitMethod(meth) {
-        //var s := ""
-        //signature.do { part -> s:= s ++ part.toGrace(depth + 1) }
-        //s
-        //methodTypes := meth.toGrace
+    method visitMethod(meth:ast.AstNode) → Boolean {
+        prependToTypeParam(meth)
+        true
     }
 
-    method visitIdentifier(ident) {
-        //opTree.push("{ident.value}")
-        return false
+    method visitMethodType(methType:ast.AstNode) → Boolean {
+        prependToTypeParam(methType)
+        true
     }
 
-    method visitMember(member) {
-        var receiver : String := member.receiver.nameString
-
-        //opTree.push("{receiver}.{member.value}")
-        return false
-    }
-
-    method visitTypeLiteral(lit) {
-        for (lit.methods) do { meth ->
-            var mtstr := "{literalCount} "
-            for (meth.signature) do { part ->
-                mtstr := mtstr ++ part.name
-                if (part.params.size > 0) then {
-                    mtstr := mtstr ++ "("
-                    for (part.params.indices) do { pnr ->
-                        var p := part.params.at(pnr)
-                        if (p.dtype != false) then {
-                            mtstr := mtstr ++ p.toGrace(1)
-                        } else {
-                            // if parameter type not listed, give it type Unknown
-                            if(p.wildcard) then {
-                                mtstr := mtstr ++ "_"
-                            } else {
-                                mtstr := mtstr ++ p.value
-                            }
-                            mtstr := mtstr ++ ":" ++ ast.unknownType.value
-                            if (false != p.generics) then {
-                                mtstr := mtstr ++ "⟦"
-                                for (1..(p.generics.size - 1)) do {ix ->
-                                    mtstr := mtstr ++ p.generics.at(ix).toGrace(1) ++ ", "
-                                }
-                                mtstr := mtstr ++ p.generics.last.toGrace(1) ++ "⟧"
-                            }
-                        }
-                        if (pnr < part.params.size) then {
-                            mtstr := mtstr ++ ", "
-                        }
-                    }
-                    mtstr := mtstr ++ ")"
-                }
-            }
-            if (meth.rtype != false) then {
-                mtstr := mtstr ++ " → " ++ meth.rtype.toGrace(1)
-            }
-            //methodtypes.push(mtstr)
-        }
-        return false
-    }
-    method visitOp(op) {
-        if ((op.value=="&") || (op.value=="|")) then {
-            def leftkind = op.left.kind
-            def rightkind = op.right.kind
-
-            //opTree.push(op.value)
-
-            if ((leftkind=="identifier") || (leftkind=="member")) then {
-                var typeIdent := op.left.toGrace(0)
-                //opTree.push("{typeIdent}")
-            } elseif { leftkind=="typeliteral" } then {
-                literalCount := literalCount + 1
-                //opTree.push("{literalCount}")
-                visitTypeLiteral(op.left)
-            } elseif { leftkind=="op" } then {
-                visitOp(op.left)
-            }
-            if ((rightkind=="identifier") || (rightkind=="member")) then {
-                var typeIdent := op.right.toGrace(0)
-                //opTree.push("{typeIdent}")
-            } elseif { rightkind=="typeliteral" } then {
-                literalCount := literalCount + 1
-                //opTree.push("{literalCount}")
-                visitTypeLiteral(op.right)
-            } elseif { rightkind=="op" } then {
-                visitOp(op.right)
+    // Prepend impName to references to types that are not prelude types
+    //
+    // Also make sure we are prepending impName to type annotations and not
+    // parameter names(stored as identifierBindings).
+    method visitIdentifier(ident:ast.AstNode) → Boolean {
+        // identifierresolution can also prepend 'self' and 'module()Object' to
+        // calls. These are not needed for type-checking so we ignore them
+        if ((ident.name == "self") || {ident.name == "module()Object"}) then {
+            ident.name := impName
+        } elseif {preludeTypes.contains(ident.name).not} then {
+            if (ident.isBindingOccurrence.not) then {
+                ident.name := "{impName}.{ident.name}"
             }
         }
-        return false
+        true
+    }
+
+    // Prepend impName to type parameters
+    //
+    // Do not need to check if type params are prelude types since the
+    // identifier resolution makes sure their name is unused.
+    method prependToTypeParam(node:ast.AstNode) → Done is confidential {
+        if (false ≠ node.typeParams) then {
+            for (node.typeParams.params) do { tParam : ast.AstNode →
+                tParam.name := "{impName}.{tParam.name}"
+            }
+        }
     }
 }
+
 method generateGctForModule(moduleObject) is confidential {
     def gct = buildGctFor(moduleObject)
     addFreshMethodsOf (moduleObject) to (gct)
