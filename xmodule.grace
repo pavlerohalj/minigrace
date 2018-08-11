@@ -591,7 +591,7 @@ method buildGctFor(module) {
                     }
                 }
                 acc := acc ++ "\n \}"
-                gct.at ("publicImport:{v.nameString}") put(list[acc])
+                gct.at ("typedec-of:${v.nameString}") put(list[acc])
             } else {
                 confidentials.push(v.nameString)
             }
