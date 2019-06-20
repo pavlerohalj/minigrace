@@ -14,14 +14,13 @@ l1
 l2
 j1
 j2
-compiler-js
 compiler-inspect
 grace
 js/mgc
 minigrace
 minigrace-js
 misc
-npm-build
+npm-build-dir
 package.json
 selftest
 buildinfo.grace

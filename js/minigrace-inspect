@@ -1,0 +1,15 @@
+#!/bin/bash
+
+# Executes the script minigrace-js in the same directory as this script,
+# but with the --inspect flag, whichconnects to the Chrome debugger
+# (provided that Chrome is your /default/ web browser).
+
+absolutePath(){
+[[ -d $1 ]] && { cd "$1"; echo "$(pwd -P)"; } ||
+( cd "$(dirname "$1")" || exit 1; echo "$(pwd -P)/$(basename "$1")"; )
+}
+
+HERE="`absolutePath $0`"
+HERE="`dirname ${HERE}`"
+echo executing /usr/bin/env NODE_OPTIONS="--max-old-space-size=2048 --inspect" node ${HERE}/minigrace-js $*
+/usr/bin/env NODE_OPTIONS="--max-old-space-size=2048 --inspect" node ${HERE}/minigrace-js $*
