@@ -442,8 +442,8 @@ method gctAsString(gctDict) {
     return ret
 }
 
-var opTree := list [ ]
-var methodtypes := list [ ]
+var opTree:List⟦String⟧ := list [ ]
+var methodtypes:List⟦String⟧ := list [ ]
 def typeVisitor = object {
     inherit ast.baseVisitor
     var literalCount := 1
@@ -454,6 +454,8 @@ def typeVisitor = object {
     }
 
     method visitMember(member) {
+        def receiverName = member.receiver.nameString
+        opTree.add "{receiverName}.{member.value}"
         return false
     }
 
@@ -575,10 +577,162 @@ method buildGctFor(module) {
     module.parentsDo { p ->
         meths.addAll(p.providedNames)       // add inherited and used methods
     }
+
+    //Set of prelude types; used when writing the type definition of imported
+    //types
+    def preludeTypes: Set⟦String⟧ = emptySet
+
+
+    preludeTypes.addAll( ["Pattern", "Iterator", "Boolean", "Number", "String",
+                          "List", "Set", "Sequence", "Dictionary", "Point",
+                          "Binding", "Collection", "Enumerable", "Range"])
+
     for (module.value) do { v->
         // TODO: replace this scan of the whole module by traversal of the
         // module symbol table
-        if (v.kind == "vardec") then {
+        if (v.kind == "import") then {
+              def impGct:Dictionary⟦String, List⟦String⟧⟧ =
+                                        parseGCT(v.path) sourceDir(util.outDir)
+
+              if (v.isPublic) then {
+                  meths.push("{v.nameString}")
+                  def gctType = if (false != v.dtype) then {v.dtype.toGrace 0} else {"Unknown"}
+                  publicMethodTypes.push("{v.nameString} → {gctType}")
+
+                  var impMeths:List⟦String⟧ := list.empty
+
+                  if (impGct.containsKey("publicMethodTypes")) then {
+                      impMeths := impGct.at "publicMethodTypes"
+                      for(impMeths.indices) do { i : Number →
+                          var read : String := "1 " // Number to indicate a method signature
+                          var unread : String := impMeths.at(i)
+                          var param : Number := unread.indexOf ":"
+
+                          while {param > 0} do {
+                              var comma : Number
+                              var rightParen : Number
+                              var paramType : String
+                              read := read ++ unread.substringFrom 1 to (param)
+                              unread := unread.substringFrom (param + 1)
+
+                              comma := unread.indexOf ","
+                              rightParen := unread.indexOf ")"
+
+                              if ((comma > 0) && {comma < rightParen}) then {
+                                  paramType := unread.substringFrom 1 to (comma - 1)
+                                  if (preludeTypes.contains(paramType).not) then {
+                                      paramType := "{v.nameString}.{paramType}"
+                                  }
+
+                                  read := read ++ paramType
+                                  unread := unread.substringFrom(comma)
+
+                                  param := unread.indexOf ":"
+                              } else {
+                                  paramType := unread.substringFrom 1 to (rightParen - 1)
+                                  if (preludeTypes.contains(paramType).not) then {
+                                      paramType := "{v.nameString}.{paramType}"
+                                  }
+
+                                  read := read ++ paramType
+                                  unread := unread.substringFrom(rightParen)
+
+                                  param := unread.indexOf(":")
+                              }
+                          }
+
+                          var ret:Number := unread.indexOf "→"
+                          read := read ++ unread.substringFrom 1 to (ret + 1)
+                          unread := unread.substringFrom(ret + 2)
+
+                          if (preludeTypes.contains(unread)) then {
+                              read := "{read}{unread}"
+                          } else {
+                              read := "{read}{v.nameString}.{unread}"
+                          }
+
+                          impMeths.at(i) put (read)
+                      }
+                  }
+
+
+                  gct.at "methodtypes-of:{v.nameString}" put(impMeths)
+              } else {
+                  confidentials.push(v.nameString)
+              }
+
+
+              def unresolvedTypes: List⟦String⟧ = list [ ]  // the types that we have yet to resolve
+              unresolvedTypes.addAll(impGct.at "types" ifAbsent { [] })  // add all public types
+
+              for (unresolvedTypes) do { typeName:String →
+                  if (impGct.containsKey "methodtypes-of:{typeName}") then {
+
+                      meths.add "{v.nameString}.{typeName}"
+                      types.add "{v.nameString}.{typeName}"
+
+                      def typeDef = impGct.at "methodtypes-of:{typeName}"
+
+                      for (typeDef.indices) do { i →
+                          if (typeDef.at(i).startsWithDigit) then {
+                              var read : String := ""
+                              var unread : String := typeDef.at(i)
+                              var param : Number := unread.indexOf(":")
+
+                              while {param > 0} do {
+                                  var comma : Number
+                                  var rightParen : Number
+                                  var paramType : String
+                                  read := read ++ unread.substringFrom(1) to (param)
+                                  unread := unread.substringFrom (param + 1)
+
+                                  comma := unread.indexOf(",")
+                                  rightParen := unread.indexOf(")")
+
+                                  if ((comma > 0) && {comma < rightParen}) then {
+                                      paramType := unread.substringFrom(1) to (comma - 1)
+                                      if (preludeTypes.contains(paramType).not) then {
+                                          paramType := "{v.nameString}.{paramType}"
+                                      }
+
+                                      read := read ++ paramType
+                                      unread := unread.substringFrom(comma)
+
+                                      param := unread.indexOf(":")
+                                  } else {
+                                      paramType := unread.substringFrom(1) to (rightParen - 1)
+                                      if (preludeTypes.contains(paramType).not) then {
+                                          paramType := "{v.nameString}.{paramType}"
+                                      }
+
+                                      read := read ++ paramType
+                                      unread := unread.substringFrom(rightParen)
+
+                                      param := unread.indexOf(":")
+                                  }
+                              }
+
+                              var ret : Number := unread.indexOf("→")
+                              read := read ++ unread.substringFrom(1) to (ret + 1)
+                              unread := unread.substringFrom(ret + 2)
+
+                              if (preludeTypes.contains(unread)) then {
+                                  read := "{read}{unread}"
+                              } else {
+                                  read := "{read}{v.nameString}.{unread}"
+                              }
+
+                              typeDef.at(i) put (read)
+                          } elseif {typeDef.at(i).startsWithLetter} then {
+                              typeDef.at(i) put ("{v.nameString}.{typeDef.at(i)}")
+                          }
+                      }
+                      gct.at ("methodtypes-of:{v.nameString}.{typeName}") put(typeDef)
+                  }
+
+              }
+
+        } elseif {v.kind == "vardec"} then {
             def gctType = if (false != v.dtype) then {v.dtype.toGrace(0)} else {"Unknown"}
             def varRead: String = "{v.name.value} → {gctType}"
             if (v.isReadable) then {
@@ -608,11 +762,11 @@ method buildGctFor(module) {
         } elseif {v.kind == "typedec"} then {
             if (v.isPublic) then {
                 meths.add(v.nameString)
-                types.push(v.nameWithParams)
+                types.add(v.nameWithParams)
                 methodtypes := list [ ]
                 opTree := list [ ]
                 v.value.accept(typeVisitor)
-                gct.at "methodtypes-of:{v.nameWithParams}" put(methodtypes)
+                gct.at "methodtypes-of:{v.nameWithParams}" put (methodtypes.sort ++ opTree)
             } else {
                 confidentials.push(v.nameString)
             }
@@ -652,14 +806,6 @@ method buildGctFor(module) {
                         put(obConstructors)
                     classes.push(v.name.value)
                 }
-            }
-        } elseif {v.kind == "import"} then {
-            if (v.isPublic) then {
-                meths.add(v.nameString)
-                def gctType = if (false != v.dtype) then {v.dtype.toGrace(0)} else {"Unknown"}
-                publicMethodTypes.push("{v.name.value} → {gctType}")
-            } else {
-                confidentials.push(v.nameString)
             }
         }
     }
