@@ -567,8 +567,7 @@ method buildGctFor(module) {
         // module symbol table
         if (v.kind == "import") then {
             // Retrieve gctfile of import
-            def impGct: Dictionary⟦String, List⟦String⟧⟧ =
-                                      parseGCT(v.path) sourceDir(util.outDir)
+            def impGct = gctDictionaryFor(v.path)
             def impName : String = v.nameString
 
             // If the imported module is public, construct a type that holds
