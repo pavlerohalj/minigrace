@@ -444,23 +444,33 @@ method gctAsString(gctDict) {
     return ret
 }
 
-// Comb through an AstNode to prepend the import nickname to any type references
-// that are not prelude types.
-//
-// When importing a file with the nickname 'impName', we need to prepend
-// 'impName' to references to any type 'T' that are accessible in our import but
-// are only accessible to us as 'impName.T'. These type references are saved as
-// identifier nodes inside an Ast tree created from the type declarations and
-// method types saved in the gct file.
-class importVisitor(impName : String) → ast.AstVisitor {
+class importVisitor(nickName:String) → ast.AstVisitor {
+    // Visit an Ast to prepend the import nickname to any type references
+    // that are not prelude types.
+    //
+    // When importing a file with `nickname`, we need to prepend
+    // `nickName` to references to any type 'T' that is accessible in our import but
+    // is accessible to us as 'nickName.T'. These type references are saved as
+    // identifier nodes inside an Ast created from the type declarations and
+    // method types in the gct.
+
+    // FIXME (apb): I believe that this is all misguided.  Why shoudn't objects
+    // accessible through nicknames be handles in exactly the same way as objects
+    // accessible through any other name — using elementScope in the symbol table?
+    // Handling the names from the prelude specially is also wrong, because the
+    // imported module may be written in a different dialect (aka prelude) from the
+    // current module.  Compiling in a partricular set of prelude names is clearly
+    // wrong: they should be read from the approriate dialect's gct.
+
     inherit ast.baseVisitor
 
-    // Special case where we also want to prepend impName to the name of the
-    // type definition as well as any type parameters it may have.
     method visitTypeDec(typeDec:ast.AstNode) → Boolean {
-        //typeDec.name is a identifierBinding, so we need to manually prepend
-        //impName here
-        typeDec.name.name := "{impName}.{typeDec.nameString}"
+        // Special case where we also want to prepend nickName to the name of the
+        // type definition, as well as any type parameters it may have.
+
+        // typeDec.name is a identifierBinding, so we need to manually prepend
+        // nickName here
+        typeDec.name.name := "{nickName}.{typeDec.nameString}"
 
         prependToTypeParam(typeDec)
         true
@@ -476,31 +486,31 @@ class importVisitor(impName : String) → ast.AstVisitor {
         true
     }
 
-    // Prepend impName to references to types that are not prelude types
-    //
-    // Also make sure we are prepending impName to type annotations and not
-    // parameter names(stored as identifierBindings).
     method visitIdentifier(ident:ast.AstNode) → Boolean {
+        // Prepend nickName to references to types that are not prelude types
+
+        // Ensure that we are prepending nickName to type annotations and not
+        // parameter names (stored as identifierBindings).
         // identifierresolution can also prepend 'self' and 'module()Object' to
         // calls. These are not needed for type-checking so we ignore them
         if ((ident.name == "self") || {ident.name == "module()Object"}) then {
-            ident.name := impName
+            ident.name := nickName
         } elseif {preludeTypes.contains(ident.name).not} then {
             if (ident.isBindingOccurrence.not) then {
-                ident.name := "{impName}.{ident.name}"
+                ident.name := "{nickName}.{ident.name}"
             }
         }
         true
     }
 
-    // Prepend impName to type parameters
-    //
-    // Do not need to check if type params are prelude types since the
-    // identifier resolution makes sure their name is unused.
     method prependToTypeParam(node:ast.AstNode) → Done is confidential {
+        // Prepend nickName to type parameters
+
+        // Do not need to check if type params are prelude types since the
+        // identifier resolution makes sure their name is unused.
         if (false ≠ node.typeParams) then {
             for (node.typeParams.params) do { tParam : ast.AstNode →
-                tParam.name := "{impName}.{tParam.name}"
+                tParam.name := "{nickName}.{tParam.name}"
             }
         }
     }
@@ -568,14 +578,13 @@ method buildGctFor(module) {
         if (v.kind == "import") then {
             // Retrieve gctfile of import
             def impGct = gctDictionaryFor(v.path)
-            def impName : String = v.nameString
 
-            // If the imported module is public, construct a type that holds
-            // all of its public methods since they are now accessible through
-            // the importer module.
             if (v.isPublic) then {
+                // If the imported module is public, construct a type that holds
+                // all of its public methods since they are now accessible through
+                // the importer module.
                 publics.add("{v.nameString}")
-                types.push("{v.nameString}")
+                types.add("{v.nameString}")
 
                 // Create the method that returns this imported module
                 publicMethodTypes.push("{v.nameString} → {v.nameString}")
@@ -592,22 +601,20 @@ method buildGctFor(module) {
                 acc := acc ++ "\n \}"
                 gct.at ("typedec-of:${v.nameString}") put(list[acc])
             } else {
-                confidentials.push(v.nameString)
+                confidentials.add(v.nameString)
             }
 
             // Collect the public types from this imported module
-            for (impGct.keys) do { key : String →
-                if (key.startsWith("typedec-of:")) then {
-                    def typeName : String = key.substringFrom(12) to(key.size)
-                    publics.add("{v.nameString}.{typeName}")
-                    types.push("{v.nameString}.{typeName}")
-                    gct.at ("typedec-of:{v.nameString}.{typeName}")
-                                                           put (impGct.at(key))
+            for (impGct.keys) do { key →
+                if (key.startsWith "typedec-of:") then {
+                    def typeName = key.substringFrom 12
+                    publics.add "{v.nameString}.{typeName}"
+                    types.add "{v.nameString}.{typeName}"
+                    gct.at "typedec-of:{v.nameString}.{typeName}" put (impGct.at(key))
                 }
             }
-
-        // Write the read and write methods of public vardecs to gct
         } elseif {v.kind == "vardec"} then {
+            // Write the reader and writer methods of public vars
             def gctType = if (false ≠ v.dtype) then {v.dtype.toGrace 0} else {"Unknown"}
             def varRead: String = "{v.name.value} → {gctType}"
             if (v.isReadable) then {
@@ -615,17 +622,17 @@ method buildGctFor(module) {
                 publicMethodTypes.add(varRead)
                 gct.at "publicMethod:{v.name.value}" put(list[varRead])
             } else {
-                confidentials.push(v.name.value)
+                confidentials.add(v.name.value)
             }
 
             def varWrite: String = "{v.name.value}:=({v.name.value}': " ++
                                                             "{gctType}) → Done"
             if (v.isWritable) then {
                 publics.add(v.name.value ++ ":=(1)")
-                publicMethodTypes.push(varWrite)
-                gct.at("publicMethod:{v.name.value}:=(1)") put(list[varWrite])
+                publicMethodTypes.add(varWrite)
+                gct.at "publicMethod:{v.name.value}:=(1)" put(list[varWrite])
             } else {
-                confidentials.push(varWrite)
+                confidentials.add(varWrite)
             }
         } elseif {v.kind == "method"} then {
 
@@ -636,17 +643,16 @@ method buildGctFor(module) {
                 publicMethodTypes.push(generateMethodHeader(v))
                 gct.at("publicMethod:{v.nameString}") put(list[methType.toGrace(0)])
             } else {
-                confidentials.push(v.nameString)
+                confidentials.add(v.nameString)
             }
-
-        // Write to gct the full type declaration of public typedecs
         } elseif {v.kind == "typedec"} then {
+            // Write to gct the full type declaration of public typedecs
             if (v.isPublic) then {
                 publics.add(v.nameString)
                 types.add(v.nameWithParams)
-                gct.at ("typedec-of:{v.nameWithParams}") put(list[v.toGrace(0)])
+                gct.at "typedec-of:{v.nameWithParams}" put(list[v.toGrace(0)])
             } else {
-                confidentials.push(v.nameString)
+                confidentials.add(v.nameString)
             }
         } elseif {v.kind == "defdec"} then {
             if (v.isPublic) then {
@@ -655,7 +661,7 @@ method buildGctFor(module) {
                 publicMethodTypes.push("{v.name.value} → {gctType}")
                 gct.at("publicMethod:{v.name.value}") put (list["{v.name.value} → {gctType}"])
             } else {
-                confidentials.push(v.nameString)
+                confidentials.add(v.nameString)
             }
             if (ast.findAnnotation(v, "parent")) then {
                 v.scope.elements.keysDo { m -> publics.add(m) }
