@@ -801,6 +801,7 @@ class methodSignatureNode(parts', rtype') {
     method numTypeParams { signature.first.numTypeParams }
     method hasTypeParams { false ≠ signature.first.typeParams }
     method typeParams { signature.first.typeParams }
+    method typeParams:=(p) { signature.first.typeParams := p }
     method withTypeParams(tp) {
         signature.first.typeParams := tp
         self
