@@ -77,53 +77,13 @@ class start (s:Position) end (e:Position) -> Range {
 def noPosition is public = line 0 column 0
 def emptyRange is public = start (noPosition) end (noPosition)
 
-method positionOfNext (needle:String) after (pos:Position) -> Position {
-    // returns the Position of the end of needle in the source
-
-    if (needle == "⟦") then {
-        return positionOfNext "[[" or "⟦" after (pos)
-    }
-    if (needle == "⟧") then {
-        return positionOfNext "]]" or "⟧" after (pos)
-    }
-    def sourceLines = util.lines
-    var lineNr := pos.line
-    if (lineNr == 0) then { return noPosition }
-    var found := sourceLines.at(lineNr).indexOf (needle) startingAt (pos.column + 1)
-    while { found == 0 } do {
-        lineNr := lineNr + 1
-        if (lineNr > sourceLines.size) then { return noPosition }
-        found := sourceLines.at(lineNr).indexOf (needle)
-    }
-    line (lineNr) column (found + needle.size - 1)
-}
-
-method positionOfNext (needle1:String) or (needle2:String)
-          after (pos:Position) -> Position {
-    def sourceLines = util.lines
-    def startLine = pos.line
-    if (startLine == 0) then { return noPosition }
-    var found := sourceLines.at(startLine).indexOf (needle1) startingAt (pos.column + 1)
-    if (found ≠ 0) then {
-        return line (startLine) column (found + needle1.size - 1)
-    }
-    found := sourceLines.at(startLine).indexOf (needle2) startingAt (pos.column + 1)
-    if (found ≠ 0) then {
-        return line (startLine) column (found + needle2.size - 1)
-    }
-    for (startLine..sourceLines.size) do { ln ->
-        if (ln > sourceLines.size) then { return noPosition }
-        found := sourceLines.at(ln).indexOf (needle1)
-        if (found ≠ 0) then {
-            return line (ln) column (found + needle1.size - 1)
-        }
-        found := sourceLines.at(ln).indexOf (needle2)
-        if (found ≠ 0) then {
-            return line (ln) column (found + needle2.size - 1)
-        }
+trait setEnd {
+    method end:=(nu) { abstract }
+    method setEndPositionFrom(tok) {
+        end := line (tok.line) column (tok.endPos)
+        self
     }
 }
-
 def lineLength is public = 80
 def uninitialized = Singleton.named "uninitialized"
 method listMap(l, b) ancestors(ac) is confidential {
@@ -238,6 +198,7 @@ class baseNode {
     method column { linePos }   // so that AstNode conforms to Position
     method start { line (line) column (linePos) }
     method end -> Position { line (line) column (linePos + self.value.size - 1) }
+    method endPos { end.column }
     method range { start (start) end (end) }
     method kind { abstract }
     method isNull { false }
@@ -485,13 +446,14 @@ def ifNode is public = object {
 def blockNode is public = object {
   class new(params', body') {
     inherit baseNode
+    use setEnd
     def kind is public = "block"
     def value is public = "block"
     var params is public := params'
     var body is public := body'
     def selfclosure is public = true
     var matchingPattern is public := false
-    var extraRuntimeData is public := false
+    var end is readable
     for (params') do {p->
         p.accept(patternMarkVisitor) from(ancestorChain.with(self))
     }
@@ -528,14 +490,6 @@ def blockNode is public = object {
     method aParametersHasATypeAnnotation {
         params.do { p -> if (false ≠ p.dtype) then { return true } }
         return false
-    }
-    method end -> Position {
-        if (body.size > 0) then { return body.last.end }
-        if (params.isEmpty) then {
-            positionOfNext "}" after (start)
-        } else {
-            positionOfNext "}" after (params.last.end)
-        }
     }
     method accept(visitor : AstVisitor) from(ac) {
         if (visitor.visitBlock(self) up(ac)) then {
@@ -609,7 +563,7 @@ def blockNode is public = object {
     }
     method postCopy(other) {
         matchingPattern := other.matchingPattern
-        extraRuntimeData := other.extraRuntimeData
+        end := other.end
         self
     }
   }
@@ -892,12 +846,14 @@ class methodSignatureNode(parts', rtype') {
 def typeLiteralNode is public = object {
   class new(methods', types') {
     inherit baseNode
+    use setEnd
     def kind is public = "typeliteral"
     var methods is public := methods'
     var types is public := types'
     var nominal is public := false
     var anonymous is public := true
     var value is public := "‹anon›"
+    var end is readable
 
     method name { value }
     method name:=(n) {
@@ -909,12 +865,6 @@ def typeLiteralNode is public = object {
     }
     method declarationKindWithAncestors(ac) { k.typedec }
     method isExecutable { false }
-
-    method end -> Position {
-        def tEnd = if (types.isEmpty) then {noPosition} else {types.last.end}
-        def mEnd = if (methods.isEmpty) then {noPosition} else {methods.last.end}
-        positionOfNext "}" after (max(max(tEnd, mEnd), start))
-    }
 
     method accept(visitor : AstVisitor) from(ac) {
         if (visitor.visitTypeLiteral(self) up(ac)) then {
@@ -966,6 +916,7 @@ def typeLiteralNode is public = object {
         nominal := other.nominal
         anonymous := other.anonymous
         value := other.value
+        end := other.end
         self
     }
   }
@@ -1068,6 +1019,7 @@ def methodNode is public = object {
         // dtype is the declared return type of the method, or false.
 
         inherit baseNode
+        use setEnd
         def kind is public = "method"
         var description is public := kind   // changed to "class" or "trait" by parser
         var signature is public := signature'
@@ -1086,17 +1038,7 @@ def methodNode is public = object {
         method usesTraitSyntax { "trait" == description }
         var cachedIdentifier := uninitialized
         var isBindingOccurrence is readable := true
-
-        method end -> Position {
-            if (body.isEmpty.not) then {
-                if (usesClassSyntax) then { return body.last.end }
-                return positionOfNext "}" after (body.last.end)
-            }
-            if (false ≠ dtype) then {
-                return positionOfNext "}" after (dtype.end)
-            }
-            return positionOfNext "}" after (signature.last.end)
-        }
+        var end:Position is readable
         method ilkName {
             // a string describing the ilk of the objects returned by this method
             if (isFresh && {body.last.isObject}) then {
@@ -1343,6 +1285,7 @@ def methodNode is public = object {
             if (other.isAppliedOccurrence) then {
                 self.appliedOccurrence
             }
+            end := other.end
             self
         }
     }
@@ -1398,7 +1341,7 @@ def callNode is public = object {
             parts.fold { acc, each -> acc ++ each.canonicalName }
                 startingWith ""
         }
-
+        method value { canonicalName }  // to be polymorphic with identifier
         method isCall { true }
         method returnsObject {
             // we recognize two special calls ac returning a fresh object
@@ -1556,10 +1499,7 @@ def moduleNode is public = object {
         setStart(line 1 column 1)           // always starts at the start of the puput
         var imports is public := list.empty
         var directImports is public := list.empty
-
-        method end -> Position {
-            line (util.lines.size) column (util.lines.last.size)
-        }
+        end := noPosition
         method isModule { true }
         method isTrait { false }
         method returnsObject { false }
@@ -1607,6 +1547,7 @@ def moduleNode is public = object {
         }
         method postCopy(other) {
             imports := other.imports
+            end := other.end
             directImports := other.directImports
             theDialect := other.theDialect
             // copy the fields of moduleNode
@@ -1628,6 +1569,7 @@ def objectNode is public = object {
     }
     class new(b, superclass') {
         inherit baseNode
+        use setEnd
         def kind is public = "object"
         var value is public := b
         var superclass is public := superclass'
@@ -1637,19 +1579,7 @@ def objectNode is public = object {
         var inTrait is public := false
         var myLocalNames := false
         var annotations is public := list [ ]
-
-        method end -> Position {
-            if (value.isEmpty.not) then {
-                return positionOfNext "}" after (value.last.end)
-            }
-            def iEnd = if (false == superclass) then { noPosition } else { superclass.end }
-            def tEnd = if (usedTraits.isEmpty) then { noPosition } else { usedTraits.last.end }
-            if (iEnd ≠ tEnd) then {
-                positionOfNext "}" after (max(iEnd, tEnd))
-            } else {
-                positionOfNext "}" after (start)
-            }
-        }
+        var end is readable
         method description -> String {
             if (isTrait) then {
                 "{kind} (is trait)"
@@ -1809,16 +1739,11 @@ def objectNode is public = object {
 def arrayNode is public = object {
   class new(values) {
     inherit baseNode
+    use setEnd
     def kind is public = "array"
     var value is public := values
+    var end is readable
     method isSequenceConstructor { true }
-    method end -> Position {
-        if (value.isEmpty) then {
-            positionOfNext "]" after (start)
-        } else {
-            positionOfNext "]" after (value.last.end)
-        }
-    }
     method accept(visitor : AstVisitor) from(ac) {
         if (visitor.visitArray(self) up(ac)) then {
             def newChain = ac.extend(self)
@@ -1855,6 +1780,10 @@ def arrayNode is public = object {
     method shallowCopy {
         arrayNode.new(emptySeq).shallowCopyFieldsFrom(self)
     }
+    method postCopy(other) {
+        end := other.end
+        self
+    }
   }
 }
 class outerNode(nodes) {
@@ -1887,6 +1816,23 @@ class outerNode(nodes) {
         line (line) column (linePos + 4)
     }
 }
+
+method newRequestOnReceiver(rcvr:AstNode) name(id) {
+    // returns a new AST node representing <rcvr>.<id>
+
+    // id can be a call node, an identifier node, or a token:
+    // it must have a value and a position
+
+    def result = memberNode.new(id.value, rcvr)
+    result.setPositionFrom(rcvr)
+    result.setEndPositionFrom(id)
+    result.reqStart := line(id.line) column (id.linePos)
+    result.setScope(rcvr.scope)
+    util.log 45 verbose (result.pretty 0)
+    result
+}
+
+
 def memberNode is public = object {
     method new(request, receiver) scope(s) {
         // Represents a dotted request ‹receiver›.‹request› with no arguments.
@@ -1897,6 +1843,7 @@ def memberNode is public = object {
     class new(request, receiver') {
         // Represents a dotted request ‹receiver›.‹request› with no arguments.
         inherit baseNode
+        use setEnd
         def kind is public = "member"
         var value:String is public := request
         var receiver is public := receiver'
@@ -1904,13 +1851,8 @@ def memberNode is public = object {
         var isSelfRequest is public := false
         var isTailCall is public := false      // is possibly the result of a method
         var isFresh is public := false         // calls a fresh method
-        method end -> Position {
-            if (receiver.isImplicit) then {
-                positionOfNext (request) after (start)
-            } else {
-                positionOfNext (request) after (receiver.end)
-            }
-        }
+        var end is readable
+        var reqStart is public
         method onSelf {
             isSelfRequest := true
             self
@@ -1919,21 +1861,16 @@ def memberNode is public = object {
             generics := gens
             self
         }
-        method reqStart is confidential {
-            // the position of the start of the ‹request› in this ‹receiver›.‹request›
-            if (receiver.isImplicit) then {
-                start
-            } else {
-                def reqEnd = positionOfNext (request) after (receiver.end)
-                line (reqEnd.line) column (reqEnd.column - request.size + 1)
-            }
-        }
         method nameString { value }
         method canonicalName { value }
         method isMember { true }
         method isCall { true }
 
-        method parts { list.with(requestPart.request(nameString).setStart(reqStart)) }
+        method parts {
+            list.with(requestPart.request(nameString)
+              .setStart(reqStart)
+              .setEndPositionFrom(self))
+        }
         method arguments { emptySeq }
         method argumentsDo(action) { }
         method numArgs { 0 }
@@ -2010,6 +1947,8 @@ def memberNode is public = object {
             generics := other.generics
             isSelfRequest := other.isSelfRequest
             isTailCall := other.isTailCall
+            end := other.end
+            reqStart := other.reqStart
             self
         }
     }
@@ -2018,12 +1957,13 @@ def genericNode is public = object {
   class new(base, arguments) {
     // represents an application of a parameterized type to some arguments.
     inherit baseNode
+    use setEnd
     def kind is public = "generic"
     var value is public := base
         // in a generic application, `value` is the applied type
         // e.g. in List⟦Number⟧, value is Identifier‹List›
     var args is public := arguments
-    method end -> Position { positionOfNext "⟧" after (args.last.end) }
+    var end is readable
     method nameString { value.nameString }
     method asString { toGrace 0 }
     method accept(visitor : AstVisitor) from(ac) {
@@ -2057,23 +1997,22 @@ def genericNode is public = object {
     method shallowCopy {
         genericNode.new(value, args).shallowCopyFieldsFrom(self)
     }
+    method postCopy(other) {
+        end := other.end
+        self
+    }
   }
 }
 
 class typeParametersNode(params') whereClauses (conditions) {
     inherit baseNode
+    use setEnd
     def kind is public = "typeparams"
     var params is public := params'
     var whereClauses is public := conditions
     method asString { toGrace 0 }
     method declarationKindWithAncestors(ac) { k.typeparam }
-    once method end -> Position {
-        if (whereClauses.isEmpty) then {
-            positionOfNext "⟧" after (params.last.end)
-        } else {
-            positionOfNext "⟧" after (whereClauses.last.end)
-        }
-    }
+    var end is readable
 
     method accept(visitor : AstVisitor) from(ac) {
         if (visitor.visitTypeParameters(self) up(ac)) then {
@@ -2116,6 +2055,7 @@ class typeParametersNode(params') whereClauses (conditions) {
     method postCopy(other) {
         params := other.params
         whereClauses := other.whereClauses
+        end := other.end
         self
     }
     method shallowCopy {
@@ -2135,7 +2075,7 @@ def identifierNode is public = object {
         wildcardCount := wildcardCount + 1
         def idNode = new("__{wildcardCount}", dtype)
         idNode.wildcard := true
-        idNode.end := line (idNode.line) column (idNode.linePos)
+        idNode.end := idNode.start
         idNode
     }
 
@@ -2150,19 +2090,19 @@ def identifierNode is public = object {
         var inRequest is public := false
         var generics is public := false
         var isDeclaredByParent is public := false
-        var end:Position is public := if (line ≠ 0) then {
-            line (line) column (linePos + value.size - 1)
-        } else {
-            line (line) column (linePos-1)
-        }
+        var end:Position is public := line(line) column(linePos + value.size - 1)
+            // there are two situations where end needs adjustment:
+            // (1) wildcard identitiers, and
+            // (2) identiifers created from method requests with arguments
 
         method bindingOccurrence { isBindingOccurrence := true }
         method appliedOccurrence { isBindingOccurrence := false }
 
         method name { value }
+        method size { linePos - endPos + 1 }
         method name:=(nu) {
             value := nu
-            end := line (line) column (linePos + nu.size - 1)
+            end := line(line) column(linePos + nu.size - 1)
         }
         method nameString { value }
         var canonicalName is public := value
@@ -2376,16 +2316,14 @@ def opNode is public = object {
     var generics is public := false
     var isTailCall is public := false      // is possibly the result of a method
     var isSelfRequest is public := false
+    var opPos is public // the position of the start of
+                    // ‹op› in this ‹left› ‹op› ‹right›
 
     method start -> Position { left.start }
     method end -> Position { right.end }
     method onSelf {
         isSelfRequest := true
         self
-    }
-    method opPos is confidential {
-        // the position of the start of the ‹op› in this ‹left› ‹op› ‹right›
-        positionOfNext (value) after (left.end)
     }
     method isSimple { false }    // needs parens when used as receiver
     method nameString { value ++ "(1)" }
@@ -2458,6 +2396,7 @@ def opNode is public = object {
     method postCopy(other) {
         isTailCall := other.isTailCall
         isSelfRequest := other.isSelfRequest
+        opPos := other.opPos
         self
     }
   }
@@ -3071,21 +3010,14 @@ def signaturePart is public = object {
     }
     class partName(n) params(ps) {
         inherit baseNode
+        use setEnd
         def kind is public = "signaturepart"
         var name is public := n
         var params is public := ps
         var typeParams is public := false
         var lineLength is public := 0
-
-        method end -> Position {
-            if (params.isEmpty.not) then {
-                return positionOfNext ")" after (params.last.end)
-            }
-            if (false ≠ typeParams) then {
-                return positionOfNext "⟧" after (typeParams.last.end)
-            }
-            return line (line) column (linePos + name.size - 1)
-        }
+        var end is readable
+        method endPos { end.column }
         method hasTypeParams { false ≠ typeParams }
         method numTypeParams { if (hasTypeParams) then {typeParams.size} else {0} }
         method numParams { params.size }
@@ -3154,6 +3086,7 @@ def signaturePart is public = object {
         method postCopy(other) {
             typeParams := other.typeParams
             lineLength := other.lineLength
+            end := other.end
             self
         }
         method asString {
@@ -3172,21 +3105,14 @@ def requestPart is public = object {
     }
     class request(rPart) withArgs(xs) {
         inherit baseNode
+        use setEnd
         def kind is public = "callwithpart"
         var name is public := rPart
         var args is public := xs
         var typeArgs := emptySeq
         var lineLength is public := 0
 
-        method end -> Position {
-            if (args.isEmpty.not) then {
-                return args.last.end  // there may or may not be a following `)`
-            }
-            if (typeArgs.isEmpty.not) then {
-                return positionOfNext "⟧" after (typeArgs.last.end)
-            }
-            return line (line) column (linePos + name.size - 1)
-        }
+        var end:Position is readable
         method nameString {
             if (args.size == 0) then {return name}
             name ++ "(" ++ args.size ++ ")"
@@ -3242,6 +3168,7 @@ def requestPart is public = object {
         }
         method postCopy(other) {
             lineLength := other.lineLength
+            end := other.end
             self
         }
         method statementName { "request" }
@@ -3251,20 +3178,19 @@ def requestPart is public = object {
 def commentNode is public = object {
     class new(val') {
         inherit baseNode
+        use setEnd
         def kind is public = "comment"
         var value is public := val'
         var isPartialLine:Boolean is public := false
         var isPreceededByBlankLine is public := false
-        var endLine is public := util.linenum
-
-        method end -> Position { line (endLine) column (util.lines.at(endLine).size) }
+        var end:Position is readable := line (util.linenum) column (util.lines.at(util.linenum).size)
         method isComment { true }
         method isLegalInTrait { true }
         method isExecutable { false }
-        method asString { "comment ({line}–{endLine}): {value}" }
+        method asString { "comment ({line}–{end.line}): {value}" }
         method extendCommentUsing(cmtNode) {
             value := value ++ " " ++ cmtNode.value
-            endLine := cmtNode.endLine
+            end := cmtNode.end
         }
         method map(blk) ancestors(ac) {
             var n := shallowCopy
@@ -3280,7 +3206,7 @@ def commentNode is public = object {
                 s := s ++ "  "
             }
             def pb = if (isPreceededByBlankLine) then { " > blank" } else { "" }
-            "{s}Comment{pb}({line}–{endLine}): ‹{value}›"
+            "{s}Comment{pb}({line}–{end.line}): ‹{value}›"
         }
         method toGrace(depth) {
             // Partial line comments don't start with a newline, whereas
@@ -3299,7 +3225,7 @@ def commentNode is public = object {
             value := other.value
             isPartialLine := other.isPartialLine
             isPreceededByBlankLine := other.isPreceededByBlankLine
-            endLine := other.endLine
+            end := other.end
             self
         }
     }

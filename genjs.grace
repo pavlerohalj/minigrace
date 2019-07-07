@@ -507,6 +507,7 @@ method compiletypedec(o) in (obj) {
             // is also unnecessary, if the type operators are correctly implemented.
     typeMethod.isOnceMethod := true
     typeMethod.withTypeParams(o.typeParams)
+    typeMethod.setEndPositionFrom(o)
     def typeFun = compilenode(typeMethod)
     o.register := reg
     reg
@@ -517,7 +518,9 @@ method typeFunBody(typeExpr) named (tName) {
         [ ast.callNode.new(
                 typeExpr,
                 [ast.requestPart.request "setName"
-                     withArgs[ ast.stringNode.new(tName) ] ]
+                     withArgs[ ast.stringNode.new(tName) ]
+                     .setPositionFrom(typeExpr)
+                     .setEndPositionFrom(typeExpr)]
         ).onSelf ]
     } else {
         [ typeExpr ]
@@ -936,10 +939,11 @@ method compileBuildMethodFor(methNode) withFreshCall (callExpr) inside (outerRef
     compileMetadata(methNode, funcName, name)
 }
 method compileCallToBuildMethod(callExpr) withArgs (args) {
-    util.setPosition(callExpr.line, callExpr.linePos)
     callExpr.parts.addLast(
         ast.requestPart.request "$build"
             withArgs [ast.nullNode, ast.nullNode, ast.nullNode]
+            .setPositionFrom(callExpr)
+            .setEndPositionFrom(callExpr)
     )
     def receiver = callExpr.receiver
     if { receiver.isOuter } then {
@@ -1301,11 +1305,12 @@ method compileimport(o) {
     out "    new GraceString(\"could not find module {o.path}\"));"
     out("var " ++ varf(nm) ++ " = do_import(\"{fn}\", {formatModname(o.path)});")
     initializedVars.add(nm)
-    def accessor = (ast.methodNode.new([ast.signaturePart.partName(o.nameString) scope(currentScope)],
-        [o.value], o.dtype) scope(currentScope))
+    def accessor = ast.methodNode.new([ast.signaturePart.partName(o.nameString) scope(currentScope)],
+        [o.value], o.dtype) scope(currentScope)
     accessor.line := o.line
     accessor.linePos := o.linePos
     accessor.annotations.addAll(o.annotations)
+    accessor.setEndPositionFrom(o)
     compilenode(accessor)
     out("{accessor.register}.debug = \"import\";")
     if (o.isReadable.not) then {
