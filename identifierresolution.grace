@@ -303,13 +303,13 @@ class newScopeIn(parent') kind(variety') {
         withSurroundingScopesDo { s->
             if (s.contains(name)) then {
                 if (s.variety == "dialect") then {
-                    return ast.memberNode.new(name,
-                          ast.identifierNode.new("prelude", false)
-                                scope(self)) scope(self).
-                                      onSelf.withGenericArgs(aNode.generics)
+                    def p = ast.identifierNode.new("prelude", false)
+                                scope(self)
+                    return ast.newRequestOnReceiver(p) name(aNode)
+                          .onSelf.withGenericArgs(aNode.generics)
                 } elseif { s.variety == "module" } then {
-                    return ast.memberNode.new(name, thisModule) scope(self).
-                          onSelf.withGenericArgs(aNode.generics)
+                    return ast.newRequestOnReceiver(thisModule) name(aNode)
+                            .onSelf.withGenericArgs(aNode.generics)
                 }
                 def rcvr = if (outerChain.isEmpty) then {
                     ast.identifierNode.new("self", false) scope(self).
@@ -318,9 +318,8 @@ class newScopeIn(parent') kind(variety') {
                     ast.outerNode(outerChain).setScope(self).
                           setStart(ast.noPosition)
                 }
-                return ast.memberNode.new(name, rcvr).setScope(self).
-                      setPositionFrom(aNode).
-                        onSelf.withGenericArgs(aNode.generics)
+                return ast.newRequestOnReceiver(rcvr) name(aNode)
+                        .onSelf.withGenericArgs(aNode.generics)
             }
             if (s.variety == "object") then {
                 def definingObjNode = s.node
@@ -553,8 +552,8 @@ method transformIdentifier(node) ancestors(anc) {
     if (v == "built-in") then { return node }
     if (v == "dialect") then {
         def p = ast.identifierNode.new("prelude", false) scope(nodeScope)
-        return ast.memberNode.new(nm, p)
-              scope(nodeScope).onSelf.withGenericArgs(node.generics)
+        return ast.newRequestOnReceiver(p) name(node)
+              .onSelf.withGenericArgs(node.generics)
     }
     if (nodeKind.isParameter) then { return node }
 
@@ -563,9 +562,10 @@ method transformIdentifier(node) ancestors(anc) {
         if (nodeKind == k.vardec) then { return node }
     }
     if (definingScope == nodeScope.enclosingObjectScope) then {
-        return ast.memberNode.new(nm,
-            ast.identifierNode.new("self", false) scope(nodeScope)
-        ) scope(nodeScope).onSelf.withGenericArgs(node.generics)
+        return ast.newRequestOnReceiver(
+            ast.identifierNode.new("self", false) scope(nodeScope))
+            name(node)
+            .onSelf.withGenericArgs(node.generics)
     }
     if (nodeScope.isObjectScope.not
              && {nodeScope.isInSameObjectAs(definingScope)}) then {
@@ -1333,12 +1333,12 @@ method transformBind(bindNode) ancestors(anc) {
 
     def dest = bindNode.dest
     def currentScope = bindNode.scope
-    util.setPosition(bindNode.line, bindNode.linePos)
     if ( dest.isMember ) then {
         def nm = dest.nameString
-        def nmGets = nm ++ ":="
-        def part = ast.requestPart.request(nmGets) withArgs [bindNode.value]
+        def part = ast.requestPart.request(nm ++ ":=") withArgs [bindNode.value]
                 scope(currentScope)
+                .setPositionFrom(bindNode)
+                .setEndPositionFrom(bindNode)
         def newCall = ast.callNode.new(dest.receiver, [part]) scope(currentScope)
         newCall.end := bindNode.value.end
         if (dest.receiver.isSelfOrOuter) then {
@@ -1353,6 +1353,8 @@ method transformBind(bindNode) ancestors(anc) {
                 def rcvr = currentScope.resolveOuterMethod(nmGets) fromNode(bindNode).receiver
                 def part = ast.requestPart.request(nm ++ ":=")
                         withArgs [ bindNode.value ] scope(currentScope)
+                        .setPositionFrom(bindNode)
+                        .setEndPositionFrom(bindNode)
                 def newCall = ast.callNode.new(rcvr, [ part ]) scope(currentScope).onSelf
                 newCall.end := bindNode.value.end
                 return newCall
@@ -1393,10 +1395,13 @@ method transformInherits(inhNode) ancestors(anc) {
             def preludeName = if (sv == "built-in") then { "_prelude" }
                                                     else { "prelude" }
             def preludeNode = ast.identifierNode.new(preludeName, false) scope(currentScope)
+                .setPositionFrom(inhNode)
             def newCall = ast.callNode.new(preludeNode, [
-                ast.requestPart.request (nm) withArgs [] scope(currentScope),
+                ast.requestPart.request (nm) withArgs [] scope(currentScope)
+                .setEndPositionFrom(superExpr),
                 ast.requestPart.request "$object" withArgs [
-                    ast.identifierNode.new("self", false) scope(currentScope)] scope(currentScope) ])
+                    ast.identifierNode.new("self", false) scope(currentScope)]
+                        scope(currentScope).setEndPositionFrom(superExpr) ])
             newCall.end := superExpr.end
             inhNode.value := newCall
         } else {
@@ -1405,9 +1410,11 @@ method transformInherits(inhNode) ancestors(anc) {
         }
     } elseif {superExpr.isMember} then {
         def newCall = ast.callNode.new(inhNode.value.receiver, [
-            ast.requestPart.request(inhNode.value.value) withArgs( [] ) scope(currentScope),
+            ast.requestPart.request(inhNode.value.value) withArgs( [] ) scope(currentScope)
+            .setEndPositionFrom(superExpr),
             ast.requestPart.request "$object" withArgs (
-            [ast.identifierNode.new("self", false) scope(currentScope)]) scope(currentScope) ]
+            [ast.identifierNode.new("self", false) scope(currentScope)]) scope(currentScope)
+            .setEndPositionFrom(superExpr)]
             ) scope(currentScope)
         newCall.isSelfRequest := superExpr.isSelfRequest
         newCall.end := superExpr.end
@@ -1430,7 +1437,7 @@ method transformCall(cNode) -> ast.AstNode {
     if (nominalRcvr.isImplicit) then {
         def rcvr = s.resolveOuterMethod(methodName) fromNode(cNode)
         if (rcvr.isIdentifier) then {
-            util.log 60 verbose "Transformed {cNode.pretty 0} did nothing"
+            ProgrammingError.raise "impossible case"
             return cNode
         }
         def definingScope = s.thatDefines(methodName)

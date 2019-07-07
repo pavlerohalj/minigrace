@@ -270,7 +270,7 @@ method unsuccessfulParse (aParsingBlock) {
 }
 method pushNum {
     // Push the current token onto the output stack as a number
-    var o := ast.numNode.new(sym.value)
+    def o = ast.numNode.new(sym.value)
     values.push(o)
     next
     return o
@@ -574,7 +574,9 @@ method blockBody(params) beginningWith (btok) {
     next
     def body = values
     values := originalValues
-    return ast.blockNode.new(params, body).setPositionFrom(btok)
+    ast.blockNode.new(params, body)
+            .setPositionFrom(btok)
+            .setEndPositionFrom(etok)
 }
 
 
@@ -721,6 +723,7 @@ method doif {
                 errormessages.syntaxError("an if statement must end with a '}'.")atPosition(
                     sym.line, sym.linePos)withSuggestion(suggestion)
             }
+            def bodyEndTok = sym
             next
             var econd
             var eif
@@ -878,6 +881,8 @@ method doif {
                 next
                 newelse := list []
                 eif := newIf(econd, ebody, newelse)
+                eif.thenblock.setEndPositionFrom(lastToken)
+                eif.elseblock.setEndPositionFrom(sym)   // probably not right
                 // Construct the inner "if" AST node, and then push it
                 // inside the current "else" block.
                 curelse.push(eif)
@@ -934,8 +939,9 @@ method doif {
                 }
                 next
             }
-            util.setPosition(btok.line, btok.linePos)
-            var o := newIf(cond, body, elseblock)
+            def o = newIf(cond, body, elseblock).setPositionFrom(btok)
+            o.thenblock.setEndPositionFrom(bodyEndTok)
+            o.elseblock.setEndPositionFrom(sym)
             values.push(o)
         } else {
             // Raise an error here, or it will spin nastily forever.
@@ -1035,7 +1041,7 @@ method prefixop {
         callrest(blocksOK)
         def rcvr = values.pop
         def call = ast.callNode.new(rcvr,
-            [ ast.requestPart.request "prefix{op}" withArgs [] ] )
+            [ ast.requestPart.request "prefix{op}" withArgs [].setEndPositionFrom(rcvr) ] )
         call.end := ast.line (lastToken.line) column (lastToken.endPos)
         values.push(call)
     }
@@ -1043,7 +1049,7 @@ method prefixop {
 
 method generic {
     if (sym.isLGeneric) then {
-        values.push(ast.genericNode.new(values.pop, typeArgs))
+        values.push(ast.genericNode.new(values.pop, typeArgs).setEndPositionFrom(lastToken))
     }
 }
 method trycatch {
@@ -1491,6 +1497,23 @@ method valueexpressionrest {
     }
 }
 
+type Position = ast.Position
+
+method positionOfNext (needle:String) after (pos:Position) -> Position is confidential {
+    // returns the Position of the end of needle in the source
+
+    def sourceLines = util.lines
+    var lineNr := pos.line
+    if (lineNr == 0) then { return ast.noPosition }
+    var found := sourceLines.at(lineNr).indexOf (needle) startingAt (pos.column + 1)
+    while { found == 0 } do {
+        lineNr := lineNr + 1
+        if (lineNr > sourceLines.size) then { return ast.noPosition }
+        found := sourceLines.at(lineNr).indexOf (needle)
+    }
+    ast.line (lineNr) column (found + needle.size - 1)
+}
+
 method expressionrest(name) recursingWith (recurse) blocks (acceptBlocks) {
     // Process the rest of an operator expression using the shunting-yard
     // algorithm. This method uses the oprec and toprec methods above to
@@ -1548,8 +1571,9 @@ method expressionrest(name) recursingWith (recurse) blocks (acceptBlocks) {
             o2 := ops.pop
             tmp2 := terms.pop
             tmp := terms.pop
-            util.setPosition(tmp.line, tmp.linePos)
             tmp := ast.opNode.new(o2, tmp, tmp2)
+                      .setPositionFrom(tmp)
+            tmp.opPos := positionOfNext(o2) after (tmp.end)
             terms.push(tmp)
         }
         ops.push(o)
@@ -1628,14 +1652,16 @@ method expressionrest(name) recursingWith (recurse) blocks (acceptBlocks) {
         o := ops.pop
         tmp2 := terms.pop
         tmp := terms.pop
-        util.setPosition(tmp.line, tmp.linePos)
         tmp := ast.opNode.new(o, tmp, tmp2)
+                  .setPositionFrom(tmp)
+        tmp.opPos := positionOfNext(o)after(tmp.end)
         terms.push(tmp)
     }
     tmp := terms.pop
     values.push(tmp)
     if (terms.size > 0) then {
-        errormessages.syntaxError("values left on term stack.")atPosition(sym.line, sym.linePos)
+        errormessages.syntaxError "values left on term stack."
+              atPosition(sym.line, sym.linePos)
     }
 }
 
@@ -1647,12 +1673,10 @@ method dotrest(acceptBlocks) {
     // dotted requests will also be parsed, by recursive invocations.
 
     if (sym.isDot) then {
-        util.setPosition(sym.line, sym.linePos)
         var receiver := values.pop
         next
         if (sym.isIdentifier) then {
-            def dro = ast.memberNode.new(sym.value, receiver)
-                  .setPositionFrom(receiver)
+            def dro = ast.newRequestOnReceiver(receiver) name(sym)
             values.push(dro)
             next
             if (sym.isDot) then {
@@ -1684,7 +1708,7 @@ method callrest(acceptBlocks) {
 
     // The top of the values stack may be an identifierNode, which will become
     // the method name of an implicit request, or a memberNode, whose receiver
-    // will become the receiver of the parsed call, and whose and nameString
+    // will become the receiver of the parsed call, and whose nameString
     // will become the first part-name of the method name.  It may also
     // be some other expression (such as a literal), in which case there
     // can be no arguments, and there is nothing to do.
@@ -1704,7 +1728,9 @@ method callrest(acceptBlocks) {
     def lpos = meth.linePos
     var methn := meth.nameString
     def argumentParts = list []
-    def part = ast.requestPart.request(methn) withArgs(list []).setPositionFrom(meth)
+    def part = ast.requestPart.request(methn) withArgs(list [])
+          .setPositionFrom(meth)
+          .setEndPositionFrom(meth)
     argumentParts.push(part)
     var foundArgs := false
     var tok := lastToken
@@ -1733,7 +1759,8 @@ method callrest(acceptBlocks) {
         while {sym.isIdentifier} do {
             // parse more parts of a multi-part request
             def argList = list [ ]      // will be modified by parseArgumentsFor(_)into(_)
-            def namePart = ast.requestPart.request(sym.value) withArgs(argList).setPositionFrom(sym)
+            def namePart = ast.requestPart.request(sym.value) withArgs(argList)
+                  .setPositionFrom(sym).setEndPositionFrom(sym)
             next
             def argsFound = parseArgumentsFor(meth) into (namePart) acceptBlocks (acceptBlocks)
             if (argsFound.not) then {
@@ -1778,7 +1805,9 @@ method parseArgumentsFor(meth) into (part) acceptBlocks (acceptBlocks) {
     } elseif { acceptArgument } then {
         tok := sym
         term
-        part.args.push(values.pop)
+        def arg = values.pop
+        part.args.push(arg)
+        part.setEndPositionFrom(arg)
         true
     } else {
         false
@@ -1821,6 +1850,7 @@ method parenthesizedArgs(part) startingWith (tok) {
         errormessages.syntaxError "an argument list beginning with a '(' must end with a ')'."
               atRange (rng) withSuggestion (suggestion)
     }
+    part.setEndPositionFrom(sym)
     if (sym.line == part.line) then {
         part.lineLength := sym.linePos - part.linePos
     }
@@ -2062,6 +2092,7 @@ method sequenceConstructor {
                 lastToken.line, lastToken.linePos + lastToken.size)withSuggestion(suggestion)
         }
         def o = ast.arrayNode.new(params).setPositionFrom(lSq)
+              .setEndPositionFrom(sym)
         values.push(o)
         next
     }
@@ -2248,8 +2279,8 @@ method parseObjectConstructorBody (constructName) startingWith (btok) after (pre
         } elseif { successfulParse {statement} } then {
             inPreamble := false
         } else {
-            errormessages.syntaxError("unexpected symbol '{sym.value}' in body " ++
-                "of {constructName}")
+            errormessages.syntaxError("unexpected symbol '{sym.value}' in " ++
+                "body of {constructName}")
                 atRange(sym.line, sym.linePos, sym.endPos)
         }
         separator
@@ -2257,7 +2288,9 @@ method parseObjectConstructorBody (constructName) startingWith (btok) after (pre
     def body = values
     values := originalValues
     next
-    def objNode = ast.objectNode.new(body, superObject).setPositionFrom(btok)
+    def objNode = ast.objectNode.new(body, superObject).
+          setPositionFrom(btok).setEndPositionFrom(lastToken)
+
     if (false != anns) then { objNode.annotations.addAll(anns) }
     objNode.usedTraits := usedTraits
     values.push(objNode)
@@ -2331,6 +2364,7 @@ method classOrTrait(btok) {
     def objNode = values.pop
     methNode.body := [objNode]
     methNode.description := myKind
+    methNode.setEndPositionFrom(lastToken)
     methNode.annotations.addAll(objNode.annotations)  // TODO: sort this out!
         // In a class declaration, there is just one place for annotations.
         // These might include annotations on the method (such as
@@ -2403,8 +2437,10 @@ method methodDeclaration(btok) {
             suggestion.deleteToken(sym)
             errormessages.syntaxError("a method must end with a '}'.")atPosition(
                 sym.line, sym.linePos)withSuggestion(suggestion)
+        } else {
+            methNode.setEndPositionFrom(sym)
+            next
         }
-        next
     } elseif {false == anns} then {
         def suggestion = errormessages.suggestion.new
         def closingBrace = findClosingBrace(btok, true)
@@ -2452,20 +2488,20 @@ method separator {
 }
 
 method methodDecRest(tm) {
-    // Process the remainder of a method header. These follow
-    // mostly the same rules as requests
+    // Process the remainder of a method declaration.
     //
-    // tm is a methodNode.  This method modifies tm.params in place.
+    // tm is a methodNode containing the first part of the method
+    // signature. Here we modify tm.signature in place.
 
-    var signature := tm.signature
+    def signature = tm.signature
     while {sym.isIdentifier} do {
         pushIdentifier
         def part = ast.signaturePart.partName(values.pop.nameString)
         if (sym.isLParen.not) then {
             def suggestion = errormessages.suggestion.new
             suggestion.insert "(" afterToken(lastToken)
-            errormessages.syntaxError("the declaration of a method with multiple " ++
-                  "parameter lists must have parentheses around each parameter list.")
+            errormessages.syntaxError("in the declaration of a method, " ++
+                  "every parameter list must be enclosed in parentheses.")
                   atPosition(sym.line, sym.linePos)withSuggestion(suggestion)
         }
         next
@@ -2490,11 +2526,12 @@ method methodDecRest(tm) {
         }
         if (sym.isRParen.not) then {
             def suggestion = errormessages.suggestion.new
-            suggestion.insert(")")afterToken(lastToken)
+            suggestion.insert ")" afterToken(lastToken)
             errormessages.syntaxError "a parameter list beginning with a '(' must end with a ')'"
                   atPosition(lastToken.line, lastToken.linePos + lastToken.size)
                   withSuggestion(suggestion)
         }
+        part.setEndPositionFrom(sym)
         next
         signature.push(part)
     }
@@ -2526,7 +2563,7 @@ method optionalTypeAnnotation {
 
 method methodHeader {
     // Accept a method header, including the -> and result type, and
-    // return an ast.methodNode with an empty list for the method body
+    // return a methodNode with an empty list for the method body
     if ((! acceptKeyword "prefix") && (sym.isIdentifier.not) && (sym.isOp.not)) then {
         def suggestion = errormessages.suggestion.new
         suggestion.insert(" «method name»")afterToken(lastToken)
@@ -2536,19 +2573,25 @@ method methodHeader {
     }
     def startToken = sym
     def part = ast.signaturePart.partName(startToken.value)
+    part.setEndPositionFrom(startToken)
     next
     def result = ast.methodNode.new( list [ part ], list [], false)
     if ((startToken.value == "[") && {sym.isRSquare}) then {
         errormessages.syntaxError("methods named '[]' and '[]:=' are no longer part of Grace.")
             atRange(lastToken.line, lastToken.linePos, sym.linePos)
     }
-    if (sym.isLGeneric) then { part.typeParams := typeparameters }
     if (sym.isBind) then {
         part.name := part.name ++ ":="
+        part.setEndPositionFrom(sym)
         next
     } elseif { sym.isOp  && (startToken.value == "prefix") } then {
         part.name := part.name ++ sym.value
+        part.setEndPositionFrom(sym)
         next
+    }
+    if (sym.isLGeneric) then {
+        part.typeParams := typeparameters
+        part.setEndPositionFrom(lastToken)
     }
     if (sym.isLParen) then {
         def lparen = sym
@@ -2596,6 +2639,7 @@ method methodHeader {
         if (sym.line == part.line) then {
             part.lineLength := sym.linePos - part.linePos
         }
+        part.setEndPositionFrom(sym)
         next
         if (sym.isIdentifier) then {
             // The presence of an identifier here means
@@ -2603,6 +2647,7 @@ method methodHeader {
             methodDecRest(result)
         }
     }
+    result.setEndPositionFrom(result.signature.last)
     if (sym.isArrow) then {
         // parse the return type
         next
@@ -2611,7 +2656,9 @@ method methodHeader {
                   "type. If you don't want to state the return type, omit the arrow.")
                   atRange(sym.line, sym.linePos, sym.endPos)
         }
-        result.dtype := values.pop
+        def returnType = values.pop
+        result.dtype := returnType
+        result.setEndPositionFrom(returnType)
     }
     result
 }
@@ -2662,6 +2709,7 @@ method typeparameters {
     }
     next
     ast.typeParametersNode(typeIds) whereClauses(whereConditions).setPositionFrom(openBracket)
+          .setEndPositionFrom(lastToken)
 }
 
 def typeRelations = ["<:", "<*", ":>", "*>"]
@@ -2789,7 +2837,8 @@ method methodSignature {
     def firstTok = sym
     def m = methodHeader
     var rt := m.dtype
-    ast.methodSignatureNode(m.signature, rt).setPositionFrom(firstTok)
+    ast.methodSignatureNode(m.signature, rt)
+          .setPositionFrom(firstTok)
 }
 
 method checkForSeparatorInInterface {
@@ -2842,8 +2891,9 @@ method interfaceLiteral {
             checkForSeparatorInInterface
         }
         next
-        util.setPosition(startToken.line, startToken.linePos)
         def t = ast.typeLiteralNode.new(meths, types)
+                  .setPositionFrom(startToken)
+                  .setEndPositionFrom(lastToken)
         values.push(t)
     }
 }
@@ -2988,7 +3038,8 @@ method pushComments {
 
     if ( sym.isComment.not ) then { return }
     util.setPosition(sym.line, sym.linePos)
-    var o := ast.commentNode.new(sym.value)
+    def o = ast.commentNode.new(sym.value)
+              .setEndPositionFrom(sym)
     if ((lastToken.line == sym.line) && (lastToken.kind != "comment")) then {
         o.isPartialLine := true
     } elseif { lastToken.line < (sym.line - 1) } then {
@@ -2999,13 +3050,13 @@ method pushComments {
         nextToken
         sym.isComment
     } do {
-        o := ast.commentNode.new(sym.value)
-        if ( comments.last.endLine == (sym.line - 1) ) then {
-            comments.last.extendCommentUsing(o)
+        def c = ast.commentNode.new(sym.value)
+        if ( comments.last.end.line == (sym.line - 1) ) then {
+            comments.last.extendCommentUsing(c)
         } else {
-            comments.push(o)
+            comments.push(c)
             if ( lastToken.line < (sym.line - 1) ) then {
-                o.isPreceededByBlankLine := true
+                c.isPreceededByBlankLine := true
             }
         }
     }
@@ -3036,12 +3087,12 @@ method reconcileComments {
     while { ix > 0 } do {
         def each = comments.at(ix)
         def isPostComment = (each.line == oLine) || (each.line == (oLine+1))
-        def isPreComment = each.isPreceededByBlankLine && (each.endLine == (oLine-1))
+        def isPreComment = each.isPreceededByBlankLine && (each.end.line == (oLine-1))
         if (isPostComment) then {
             postComments.push(comments.removeAt(ix))
         } elseif { isPreComment } then {
             preComments.addFirst(comments.removeAt(ix))
-        } elseif { each.endLine < (oLine-1) } then {
+        } elseif { each.end.line < (oLine-1) } then {
             ix := 0     // exit from while
         }
         ix := ix - 1
@@ -3142,19 +3193,18 @@ method parse(toks) {
     util.log_verbose "parsing."
     values.clear        //  <thismodule>.parse(_) can be requested multiple times
     moduleObject := ast.moduleNode.body(values) named (util.modname)
-
     if (toks.size == 0) then {
         return moduleObject
     }
     tokens := toks
-    while { next ; sym.isSeparator } do { }
+    while { next ; sym.isSeparator } do { }    // skip leading separators
 
     if (sym.indent ≠ 0) then {
         def msg = "the first line must not be indented"
         errormessages.syntaxError (msg)
               atRange (sym.line, 1, sym.indent)
     }
-
+    moduleObject.setPositionFrom(sym)
     while {sym.isEof.not} do {
         def oldlength = tokens.size
         pushComments
@@ -3186,5 +3236,5 @@ method parse(toks) {
         }
         separator
     }
-    return moduleObject
+    return moduleObject.setEndPositionFrom(lastToken)
 }
