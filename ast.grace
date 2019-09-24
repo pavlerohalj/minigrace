@@ -210,6 +210,18 @@ type AstNode = interface {
 
 type SymbolTable = Unknown
 
+trait typeArguments {
+    method generics -> Collection | Boolean is required
+
+    method numTypeArgs {
+        if (false == generics) then { 0 } else { generics.size }
+    }
+    method typeArgs {
+        if (false == generics) then { [] } else { generics }
+    }
+    method hasTypeArgs { false ≠ generics }
+}
+
 class baseNode {
     // the superclass of all AST nodes
     use identityEquality
@@ -219,6 +231,12 @@ class baseNode {
     var symbolTable := fakeSymbolTable
     symbolTable.node := self
     var comments is public := false
+
+    method childrenDo(anAction:Procedure1) is abstract
+    method childrenMap(f:Function1) is abstract
+    method newAccept(aVisitor) is abstract
+    method do(anAction) { anAction.apply(self) }
+    method map(fun) { fun.apply(self) }
 
     method setLine (l) col (c) {
         line := l
@@ -376,6 +394,11 @@ def implicit is public = object {
     linePos := 0
     def kind is public = "implicit"
     def nameString is public = "implicit"
+
+    method childrenDo(anAction:Procedure1) { done }
+    method childrenMap(f:Function1) { [] }
+    method newAccept(aVisitor) { aVisitor.visitImplicit(self) }
+
     method range { emptyRange }
     method isImplicit { true }
     method toGrace(depth) { "implicit" }
@@ -390,6 +413,11 @@ def implicit is public = object {
 def nullNode is public = object {
     inherit baseNode
     def kind is public = "null"
+
+    method childrenDo(anAction:Procedure1) { done }
+    method childrenMap(f:Function1) { [] }
+    method newAccept(aVisitor) { aVisitor.visitNull(self) }
+
     method toGrace(depth) {
         "// null"
     }
@@ -432,6 +460,19 @@ def ifNode is public = object {
     var thenblock is public := thenblock'
     var elseblock is public := elseblock'
     var handledIdentifiers is public := false
+
+    method childrenDo(anAction:Procedure1) {
+        anAction.apply(value)
+        anAction.apply(thenblock)
+        anAction.apply(elseblock)
+    }
+
+    method childrenMap(f:Function1) {
+        [ value.map(f), thenblock.map(f), elseblock.map(f) ]
+    }
+
+    method newAccept(aVisitor) { aVisitor.visitIf(self) }
+
     method isSimple { false }  // needs parens when used as receiver
     method accept(visitor : AstVisitor) from(ac) {
         if (visitor.visitIf(self) up(ac)) then {
@@ -505,6 +546,18 @@ def blockNode is public = object {
     def selfclosure is public = true
     var matchingPattern is public := false
     var extraRuntimeData is public := false
+
+    method childrenDo(anAction:Procedure1) {
+        params.do(anAction)
+        body.do(anAction)
+    }
+    method childrenMap(f:Function1) {
+        def result = list.empty
+        params.map(f) >> result
+        body.map(f) >> result
+    }
+
+    method newAccept(aVisitor) { aVisitor.visitBlock(self) }
 
     method isBlock { true }
     method isDelimited { true }
@@ -632,6 +685,18 @@ def tryCatchNode is public = object {
     var value is public := block
     var cases is public := cases'
     var finally is public := finally'
+
+    method childrenDo(anAction:Procedure1) {
+        value.do(anAction)
+        cases.do(anAction)
+    }
+    method childrenMap(f:Function1) {
+        def result = list.empty
+        value.map(f) >> result
+        cases.map(f) >> result
+    }
+    method newAccept(aVisitor) { aVisitor.visitTryCatch(self) }
+
     method isSimple { false }  // needs parens when used as receiver
     method end -> Position {
         if (false ≠ finally) then { return finally.end }
@@ -693,6 +758,20 @@ def matchCaseNode is public = object {
     var value is public := matchee'
     var cases is public := cases'
     var elsecase is public := elsecase'
+
+    method childrenDo(anAction:Procedure1) {
+        value.do(anAction)
+        cases.do(anAction)
+        elsecase.do(anAction)
+    }
+    method childrenMap(f:Function1) {
+        def result = list.empty
+        value.map(f) >> result
+        cases.map(f) >> result
+        elsecase.map(f) >> result
+    }
+    method newAccept(aVisitor) { aVisitor.visitMatchCase(self) }
+
     method isSimple { false }  // needs parens when used as receiver
     method end -> Position {
         if (false ≠ elsecase) then { return elsecase.end }
@@ -757,12 +836,23 @@ class methodSignatureNode(parts', rtype') {
 
     inherit baseNode
     def kind is public = "methodtype"
-    var signature is public := parts'
+    var signatureParts is public := parts'
     var rtype is public := rtype'
     var cachedIdentifier := uninitialized
     var isBindingOccurrence is readable := true
             // the only exceptions are the oldMethodName in an alias clause,
             // and an excluded name
+
+    method childrenDo(anAction:Procedure1) {
+        signatureParts.do(anAction)
+        rtype.do(anAction)
+    }
+    method childrenMap(f:Function1) {
+        def result = list.empty
+        signatureParts.map(f) >> result
+        rtype.map(f) >> result
+    }
+    method newAccept(aVisitor) { aVisitor.visitMethodSignature(self) }
 
     method postCopy(other) {
         isBindingOccurrence := other.isBindingOccurrence
@@ -776,25 +866,25 @@ class methodSignatureNode(parts', rtype') {
         self
     }
 
-    method hasParams { signature.first.params.isEmpty.not }
+    method hasParams { signatureParts.first.params.isEmpty.not }
     method numParams {
-        signature.fold { acc, p -> acc + p.numParams } startingWith 0
+        signatureParts.fold { acc, p -> acc + p.numParams } startingWith 0
     }
     method parametersDo(b) {
-        signature.do { part ->
+        signatureParts.do { part ->
             part.params.do { each -> b.apply(each) }
         }
     }
     method parameterCounts {
         def result = list [ ]
-        signature.do { part ->
+        signatureParts.do { part ->
             result.push(part.params.size)
         }
         result
     }
     method parameterNames {
         def result = list [ ]
-        signature.do { part ->
+        signatureParts.do { part ->
             part.params.do { param ->
                 result.push(param.nameString)
             }
@@ -804,43 +894,43 @@ class methodSignatureNode(parts', rtype') {
     method typeParameterNames {
         if (hasTypeParams.not) then { return list [ ] }
         def result = list [ ]
-        signature.first.typeParams.do { each ->
+        signatureParts.first.typeParams.do { each ->
             result.push(each.nameString)
         }
         result
     }
-    method numTypeParams { signature.first.numTypeParams }
-    method hasTypeParams { false ≠ signature.first.typeParams }
-    method typeParams { signature.first.typeParams }
+    method numTypeParams { signatureParts.first.numTypeParams }
+    method hasTypeParams { false ≠ signatureParts.first.typeParams }
+    method typeParams { signatureParts.first.typeParams }
     method withTypeParams(tp) {
-        signature.first.typeParams := tp
+        signatureParts.first.typeParams := tp
         self
     }
     method end -> Position {
         if ((false ≠ rtype) && {rtype.line ≠ 0}) then { return rtype.end }
-        signature.last.end
+        signatureParts.last.end
     }
     method endPos {
         end.column
     }
     method nameString {
         // the name of the method being defined, in numeric form
-        signature.fold { acc, each -> acc ++ each.nameString }
+        signatureParts.fold { acc, each -> acc ++ each.nameString }
             startingWith ""
     }
 
     method canonicalName {
         // the name of the method being defined, in underscore form
-        signature.fold { acc, each -> acc ++ each.canonicalName }
+        signatureParts.fold { acc, each -> acc ++ each.canonicalName }
             startingWith ""
     }
 
     method asIdentifier {
         if (uninitialized == cachedIdentifier) then {
             cachedIdentifier := identifierNode.new(nameString, false)
-            cachedIdentifier.line := signature.first.line
-            cachedIdentifier.linePos := signature.first.linePos
-            cachedIdentifier.end := signature.last.end
+            cachedIdentifier.line := signatureParts.first.line
+            cachedIdentifier.linePos := signatureParts.first.linePos
+            cachedIdentifier.end := signatureParts.last.end
             cachedIdentifier.canonicalName := canonicalName
             cachedIdentifier.isBindingOccurrence := isBindingOccurrence
         }
@@ -860,7 +950,7 @@ class methodSignatureNode(parts', rtype') {
     method accept(visitor : AstVisitor) from(ac) {
         if (visitor.visitMethodType(self) up(ac)) then {
             def newChain = ac.extend(self)
-            for (signature) do { part ->
+            for (signatureParts) do { part ->
                 part.accept(visitor) from(newChain)
             }
             if (false != rtype) then {
@@ -872,7 +962,7 @@ class methodSignatureNode(parts', rtype') {
         var n := shallowCopy
         def newChain = ac.extend(n)
         n.rtype := maybeMap(rtype, blk) ancestors(newChain)
-        n.signature := listMap(signature, blk) ancestors(newChain)
+        n.signatureParts := listMap(signatureParts, blk) ancestors(newChain)
         blk.apply(n, ac)
     }
     method pretty(depth) {
@@ -883,21 +973,21 @@ class methodSignatureNode(parts', rtype') {
             s := "{s}{spc}Returns:\n  {spc}{rtype.pretty(depth + 2)}"
         }
         s := "{s}\n{spc}Signature Parts:"
-        for (signature) do { part ->
+        for (signatureParts) do { part ->
             s := "{s}\n  {spc}{part.pretty(depth + 2)}"
         }
         s
     }
     method toGrace(depth : Number) -> String {
         var s := ""
-        signature.do { part -> s:= s ++ part.toGrace(depth + 1) }
+        signatureParts.do { part -> s:= s ++ part.toGrace(depth + 1) }
         if (false != rtype) then {
             s := "{s} → {rtype.toGrace(depth + 1)}"
         }
         s
     }
     method shallowCopy {
-        methodSignatureNode(signature, rtype).shallowCopyFieldsFrom(self)
+        methodSignatureNode(signatureParts, rtype).shallowCopyFieldsFrom(self)
     }
 }
 def typeLiteralNode is public = object {
@@ -909,6 +999,17 @@ def typeLiteralNode is public = object {
     var nominal is public := false
     var anonymous is public := true
     var value is public := "‹anon›"
+
+    method childrenDo(anAction:Procedure1) {
+        methods.do(anAction)
+        types.do(anAction)
+    }
+    method childrenMap(f:Function1) {
+        def result = list.empty
+        methods.map(f) >> result
+        types.map(f) >> result
+    }
+    method newAccept(aVisitor) { aVisitor.visitTypeLiteral(self) }
 
     method name { value }
     method name:=(n) {
@@ -991,6 +1092,21 @@ def typeDecNode is public = object {
     var parentKind is public := "unset"
     var annotations is public := list [ ]
     var typeParams is public := false
+
+    method childrenDo(anAction:Procedure1) {
+        name.do(anAction)
+        value.do(anAction)
+        typeParams.do(anAction)
+        annotations.do(anAction)
+    }
+    method childrenMap(f:Function1) {
+        def result = list.empty
+        name.map(f) >> result
+        value.map(f) >> result
+        typeParams.map(f) >> result
+        annotations.map(f) >> result
+    }
+    method newAccept(aVisitor) { aVisitor.visitTypeDec(self) }
 
     method nameString → String { name.value }
     method nameWithParams → String {
@@ -1093,6 +1209,20 @@ def methodNode is public = object {
         var annotations is public := list [ ]
         var isFresh is public := false      // a method is 'fresh' if it answers a new object
         var isOnceMethod is public := false
+
+        method childrenDo(anAction:Procedure1) {
+            signature.do(anAction)
+            decType.do(anAction)
+            body.do(anAction)
+        }
+        method childrenMap(f:Function1) {
+            def result = list.empty
+            signature.map(f) >> result
+            decType.map(f) >> result
+            body.map(f) >> result
+        }
+        method newAccept(aVisitor) { aVisitor.visitMethod(self) }
+
         method usesClassSyntax { "class" == description }
         method usesTraitSyntax { "trait" == description }
         var cachedIdentifier := uninitialized
@@ -1374,6 +1504,8 @@ def callNode is public = object {
         // Represents a method request with arguments.
 
         inherit baseNode
+        use typeArguments
+
         def kind is public = "call"
         var parts is public := parts'            // [ requestPart ]
         var generics is public := false
@@ -1383,6 +1515,19 @@ def callNode is public = object {
         var isFresh is public := false         // calls a fresh method
         var cachedIdentifier := uninitialized
         var endPos is public := noPosition
+
+        method childrenDo(anAction:Procedure1) {
+            receiver.do(anAction)
+            parts.do(anAction)
+            typeArgs.do(anAction)
+        }
+        method childrenMap(f:Function1) {
+            def result = list.empty
+            receiver.map(f) >> result
+            parts.map(f) >> result
+            typeArgs.map(f) >> result
+        }
+        method newAccept(aVisitor) { aVisitor.visitCall(self) }
 
         method end -> Position {
             if (endPos == noPosition) then {
@@ -1451,12 +1596,6 @@ def callNode is public = object {
         method numArgs {
             parts.fold { acc, part -> acc + part.args.size } startingWith 0
         }
-
-        method numTypeArgs {
-            if (false == generics) then { 0 } else { generics.size }
-        }
-
-        method hasTypeArgs { false ≠ generics }
 
         method accept(visitor : AstVisitor) from(ac) {
             if (visitor.visitCall(self) up(ac)) then {
@@ -1563,6 +1702,8 @@ def moduleNode is public = object {
     class body(b) {
         inherit objectNode.new(b, false)
             alias oNPostCopy(_) = postCopy(_)
+            alias objChildrenDo(_) = childrenDo(_)
+            alias objChildrenMap(_) = childrenMap(_)
         def kind is public = "module"
         def sourceLines = util.lines
         var theDialect is public := dialectNode.new "standardGrace"
@@ -1570,6 +1711,17 @@ def moduleNode is public = object {
         setStart(line 1 column 1)           // always starts at the start of the puput
         var imports is public := list.empty
         var directImports is public := list.empty
+
+        method childrenDo(anAction:Procedure1) {
+            theDialect.do(anAction)
+            objChildrenDo(anAction)
+        }
+        method childrenMap(f:Function1) {
+            def result = list.empty
+            theDialect.map(f) >> result
+            objChildrenMap(f) >> result
+        }
+        method newAccept(aVisitor) { aVisitor.visitModule(self) }
 
         method end -> Position {
             line (util.lines.size) column (util.lines.last.size)
@@ -1650,6 +1802,21 @@ def objectNode is public = object {
         var inTrait is public := false
         var myLocalNames := false
         var annotations is public := list [ ]
+
+        method childrenDo(anAction:Procedure1) {
+            superclass.do(anAction)
+            usedTraits.do(anAction)
+            annotations.do(anAction)
+            value.do(anAction)
+        }
+        method childrenMap(f:Function1) {
+            def result = list.empty
+            superclass.map(f) >> result
+            usedTraits.map(f) >> result
+            annotations.map(f) >> result
+            value.map(f) >> result
+        }
+        method newAccept(aVisitor) { aVisitor.visitObject(self) }
 
         method end -> Position {
             if (value.isEmpty.not) then {
@@ -1824,6 +1991,15 @@ def arrayNode is public = object {
     inherit baseNode
     def kind is public = "array"
     var value is public := values
+
+    method childrenDo(anAction:Procedure1) {
+        value.do(anAction)
+    }
+    method childrenMap(f:Function1) {
+        value.map(f) >> sequence
+    }
+    method newAccept(aVisitor) { aVisitor.visitArray(self) }
+
     method isSequenceConstructor { true }
     method end -> Position {
         if (value.isEmpty) then {
@@ -1877,6 +2053,15 @@ class outerNode(nodes) {
     inherit baseNode
     def kind is public = "outer"
     def theObjects is public = list.withAll(nodes)
+
+    method childrenDo(anAction:Procedure1) {
+        theObjects.do(anAction)
+    }
+    method childrenMap(f:Function1) {
+        theObjects.map(f) >> sequence
+    }
+    method newAccept(aVisitor) { aVisitor.visitOuter(self) }
+
     method numberOfLevels { theObjects.size }
     method asString { "‹object outside that at line {theObjects.last.line}›" }
     method pretty(depth) { basePretty(depth) ++ asString }
@@ -1910,6 +2095,8 @@ def memberNode is public = object {
     class new(request, receiver') {
         // Represents a dotted request ‹receiver›.‹request› with no arguments.
         inherit baseNode
+        use typeArguments
+
         def kind is public = "member"
         var value:String is public := request
         var receiver is public := receiver'
@@ -1917,6 +2104,18 @@ def memberNode is public = object {
         var isSelfRequest is public := false
         var isTailCall is public := false      // is possibly the result of a method
         var isFresh is public := false         // calls a fresh method
+
+        method childrenDo(anAction:Procedure1) {
+            receiver.do(anAction)
+            typeArgs.do(anAction)
+        }
+        method childrenMap(f:Function1) {
+            def result = list.empty
+            receiver.map(f) >> result
+            typeArgs.map(f) >> result
+        }
+        method newAccept(aVisitor) { aVisitor.visitMember(self) }
+
         method end -> Position {
             if (receiver.isImplicit) then {
                 positionOfNext (request) after (start)
@@ -1950,10 +2149,6 @@ def memberNode is public = object {
         method arguments { emptySeq }
         method argumentsDo(action) { }
         method numArgs { 0 }
-        method numTypeArgs {
-            if (false == generics) then { 0 } else { generics.size }
-        }
-        method hasTypeArgs { false ≠ generics }
 
         method accept(visitor : AstVisitor) from(ac) {
             if (visitor.visitMember(self) up(ac)) then {
@@ -2036,6 +2231,18 @@ def genericNode is public = object {
         // in a generic application, `value` is the applied type
         // e.g. in List⟦Number⟧, value is Identifier‹List›
     var args is public := arguments
+
+    method childrenDo(anAction:Procedure1) {
+        value.do(anAction)
+        arguments.do(anAction)
+    }
+    method childrenMap(f:Function1) {
+        def result = list.empty
+        value.map(f) >> result
+        arguments.map(f) >> result
+    }
+    method newAccept(aVisitor) { aVisitor.visitGeneric(self) }
+
     method end -> Position { positionOfNext "⟧" after (args.last.end) }
     method nameString { value.nameString }
     method asString { toGrace }
@@ -2080,6 +2287,18 @@ class typeParametersNode(params') whereClauses (conditions) {
     var whereClauses is public := conditions
     method asString { toGrace }
     method declarationKindWithAncestors(ac) { k.typeparam }
+
+    method childrenDo(anAction:Procedure1) {
+        params.do(anAction)
+        whereClauses.do(anAction)
+    }
+    method childrenMap(f:Function1) {
+        def result = list.empty
+        params.map(f) >> result
+        whereClauses.map(f) >> result
+    }
+    method newAccept(aVisitor) { aVisitor.visitTypeParameters(self) }
+
     once method end -> Position {
         if (whereClauses.isEmpty) then {
             positionOfNext "⟧" after (params.last.end)
@@ -2154,6 +2373,7 @@ def identifierNode is public = object {
 
     class new(name', dtype') {
         inherit baseNode
+        use typeArguments
         def kind is public = "identifier"
         var value is public := name'
         var wildcard is public := false
@@ -2169,6 +2389,17 @@ def identifierNode is public = object {
         } else {
             line (line) column (linePos-1)
         }
+
+        method childrenDo(anAction:Procedure1) {
+            typeArgs.do(anAction)
+            decType.do(anAction)
+        }
+        method childrenMap(f:Function1) {
+            def result = list.empty
+            typeArgs.map(f) >> result
+            decType.map(f) >> result
+        }
+        method newAccept(aVisitor) { aVisitor.visitIdentifier(self) }
 
         method bindingOccurrence { isBindingOccurrence := true }
         method appliedOccurrence { isBindingOccurrence := false }
@@ -2217,10 +2448,6 @@ def identifierNode is public = object {
         method usesAsType(aNode) {
             aNode == dtype
         }
-        method numTypeArgs {
-            if (false == generics) then { 0 } else { generics.size }
-        }
-        method hasTypeArgs { false ≠ generics }
         method accept(visitor : AstVisitor) from(ac) {
             if (visitor.visitIdentifier(self) up(ac)) then {
                 def newChain = ac.extend(self)
@@ -2324,6 +2551,10 @@ def stringNode is public = object {
         var end is public := line (line) column (linePos + v.size + 1)
             // +1 to allow for quotes
 
+        method childrenDo(anAction:Procedure1) { done }
+        method childrenMap(f:Function1) { [] }
+        method newAccept(aVisitor) { aVisitor.visitString(self) }
+
         method accept(visitor : AstVisitor) from(ac) {
             visitor.visitString(self) up(ac)
         }
@@ -2357,6 +2588,11 @@ def numNode is public = object {
         inherit baseNode
         def kind is public = "num"
         var value is public := val
+
+        method childrenDo(anAction:Procedure1) { done }
+        method childrenMap(f:Function1) { [] }
+        method newAccept(aVisitor) { aVisitor.visitNum(self) }
+
         method accept(visitor : AstVisitor) from(ac) {
             visitor.visitNum(self) up(ac)
         }
@@ -2383,6 +2619,8 @@ def numNode is public = object {
 def opNode is public = object {
   class new(op, l, r) {
     inherit baseNode
+    use typeArguments
+
     def kind is public = "op"
     def value is public = op     // a String
     var left is public := l
@@ -2390,6 +2628,19 @@ def opNode is public = object {
     var generics is public := false
     var isTailCall is public := false      // is possibly the result of a method
     var isSelfRequest is public := false
+
+    method childrenDo(anAction:Procedure1) {
+        typeArgs.do(anAction)
+        left.do(anAction)
+        right.do(anAction)
+    }
+    method childrenMap(f:Function1) {
+        def result = list.empty
+        typeArgs.map(f) >> result
+        left.map(f) >> result
+        right.map(f) >> result
+    }
+    method newAccept(aVisitor) { aVisitor.visitOp(self) }
 
     method start -> Position { left.start }
     method end -> Position { right.end }
@@ -2413,7 +2664,6 @@ def opNode is public = object {
     method arguments { [ right ] }
     method argumentsDo(action) { action.apply(right) }
     method numArgs { 1 }
-    method numTypeArgs { 0 }
 
     method accept(visitor : AstVisitor) from(ac) {
         if (visitor.visitOp(self) up(ac)) then {
@@ -2484,6 +2734,17 @@ def bindNode is public = object {
     var dest is public := dest'
     var value is public := val'
 
+    method childrenDo(anAction:Procedure1) {
+        dest.do(anAction)
+        value.do(anAction)
+    }
+    method childrenMap(f:Function1) {
+        def result = list.empty
+        dest.map(f) >> result
+        value.map(f) >> result
+    }
+    method newAccept(aVisitor) { aVisitor.visitBind(self) }
+
     method end -> Position { value.end }
     method nameString { dest.nameString ++ ":=(1)" }
     method canonicalName { dest.nameString ++ ":=(_)" }
@@ -2538,6 +2799,20 @@ class declarationNode(identifier, val, declaredType) {
     var annotations is public := list [ ]
     var variable is public := "not yet bound"
 
+    method childrenDo(anAction:Procedure1) {
+        name.do(anAction)
+        decType.do(anAction)
+        annotations.do(anAction)
+        if (false != value) then { value.do(anAction) }
+    }
+    method childrenMap(f:Function1) {
+        def result = list.empty
+        name.map(f) >> result
+        decType.map(f) >> result
+        annotations.map(f) >> result
+        if (false != value) then { value.map(f) >> result } else { result }
+    }
+
     method isFieldDec { true }
     method end -> Position {
         if (false ≠ value) then { return value.end }
@@ -2561,6 +2836,8 @@ def defDecNode is public = object {
         inherit declarationNode(name', val, dtype')
 
         def kind is public = "defdec"
+
+        method newAccept(aVisitor) { aVisitor.visitDefDec(self) }
 
         method isPublic {
             // defs are confidential by default
@@ -2648,6 +2925,8 @@ def varDecNode is public = object {
         inherit declarationNode(name', val, dtype')
 
         def kind is public = "vardec"
+
+        method newAccept(aVisitor) { aVisitor.visitVarDec(self) }
 
         method isPublic {
             // vars are confidential by default
@@ -2743,6 +3022,20 @@ def importNode is public = object {
     var path is public := path'
     var annotations is public := list [ ]
     var dtype is public := dtype'
+
+    method childrenDo(anAction:Procedure1) {
+        annotations.do(anAction)
+        value.do(anAction)
+        decType.do(anAction)
+    }
+    method childrenMap(f:Function1) {
+        def result = list.empty
+        annotations.map(f) >> result
+        value.map(f) >> result
+        decType.map(f) >> result
+    }
+    method newAccept(aVisitor) { aVisitor.visitImport(self) }
+
     method end -> Position { value.end }
     method isImport { true }
     method isExternal { true }
@@ -2825,6 +3118,10 @@ def dialectNode is public = object {
     var value is public := pathString
     var end is public := noPosition
 
+    method childrenDo(anAction:Procedure1) { done }
+    method childrenMap(f:Function1) { [] }
+    method newAccept(aVisitor) { aVisitor.visitDialect(self) }
+
     method isDialect { true }
     method isExternal { true }
     method isExecutable { false }
@@ -2874,6 +3171,17 @@ def returnNode is public = object {
     def kind is public = "return"
     var value is public := expr
     var dtype is public := false  // the enclosing method's declared return type
+
+    method childrenDo(anAction:Procedure1) {
+        value.do(anAction)
+        decType.do(anAction)
+    }
+    method childrenMap(f:Function1) {
+        def result = list.empty
+        value.map(f) >> result
+        decType.map(f) >> result
+    }
+    method newAccept(aVisitor) { aVisitor.visitReturn(self) }
 
     method end -> Position {
         if (noPosition ≠ value.end) then {
@@ -2935,6 +3243,19 @@ def inheritNode is public = object {
         var aliases is public := list [ ]
         var exclusions is public := list [ ]
         var isUse is public := false  // this is a `use trait` clause, not an inherit
+
+        method childrenDo(anAction:Procedure1) {
+            value.do(anAction)
+            aliases.do(anAction)
+            exclusions.do(anAction)
+        }
+        method childrenMap(f:Function1) {
+            def result = list.empty
+            value.map(f) >> result
+            aliases.map(f) >> result
+            exclusions.map(f) >> result
+        }
+        method newAccept(aVisitor) { aVisitor.visitInherit(self) }
 
         method end -> Position { value.end }
         method isLegalInTrait { isUse }
@@ -3035,6 +3356,18 @@ class aliasNew(n) old(o) {
     def newSignature is public = n
     def oldSignature is public = o
     def kind is public = "alias"
+
+    method childrenDo(anAction:Procedure1) {
+        newSignature.do(anAction)
+        oldSignature.do(anAction)
+    }
+    method childrenMap(f:Function1) {
+        def result = list.empty
+        newSignature.map(f) >> result
+        oldSignature.map(f) >> result
+    }
+    method newAccept(aVisitor) { aVisitor.visitAlias(self) }
+
     method newName {newSignature.asIdentifier}
     method oldName {oldSignature.asIdentifier}
     method asString { "alias {newSignature.nameString} = {oldSignature.nameString}" }
@@ -3084,8 +3417,19 @@ def signaturePart is public = object {
         def kind is public = "signaturepart"
         var name is public := n
         var params is public := ps
-        var typeParams is public := false
+        var typeParams is public := false  // TODO make the default value []
         var lineLength is public := 0
+
+        method childrenDo(anAction:Procedure1) {
+            if (false ≠ typeParams) then { typeParams.do(anAction) }
+            params.do(anAction)
+        }
+        method childrenMap(f:Function1) {
+            def result = list.empty
+            if (false ≠ typeParams) then { typeParams.map(f) >> result }
+            params.map(f) >> result
+        }
+        method newAccept(aVisitor) { aVisitor.visitSignaturePart(self) }
 
         method end -> Position {
             if (params.isEmpty.not) then {
@@ -3182,11 +3526,23 @@ def requestPart is public = object {
     }
     class request(rPart) withArgs(xs) {
         inherit baseNode
+        use typeArguments
         def kind is public = "callwithpart"
         var name is public := rPart
         var args is public := xs
-        var typeArgs := emptySeq
+        var generics is public := false
         var lineLength is public := 0
+
+        method childrenDo(anAction:Procedure1) {
+            typeArgs.do(anAction)
+            args.do(anAction)
+        }
+        method childrenMap(f:Function1) {
+            def result = list.empty
+            typeArgs.map(f) >> result
+            args.map(f) >> result
+        }
+        method newAccept(aVisitor) { aVisitor.visitRequestPart(self) }
 
         method end -> Position {
             if (args.isEmpty.not) then {
@@ -3219,6 +3575,12 @@ def requestPart is public = object {
         method pretty(depth) {
             def spc = "  " * (depth+1)
             var s := "{basePretty(depth)}: {name}"
+            if (hasTypeArgs) then {
+                s := "{s}\n{spc}TypeArgs:"
+                typeArgs.do { tArg ->
+                    s := s ++ tArg.pretty(depth + 3)
+                }
+            }
             s := "{s}\n{spc}Args:"
             for (args) do { a ->
                 s := "{s}\n  {spc}{a.pretty(depth + 3)}"
@@ -3227,7 +3589,7 @@ def requestPart is public = object {
         }
         method toGrace(depth) {
             var s := name
-            if (typeArgs.size > 0) then {
+            if (hasTypeArgs) then {
                 s := s ++ "⟦"
                 typeArgs.do { tArg ->
                     s := s ++ tArg.toGrace(depth + 1)
@@ -3252,6 +3614,7 @@ def requestPart is public = object {
         }
         method postCopy(other) {
             lineLength := other.lineLength
+            generics := other.generics
             self
         }
         method statementName { "request" }
@@ -3266,6 +3629,10 @@ def commentNode is public = object {
         var isPartialLine:Boolean is public := false
         var isPreceededByBlankLine is public := false
         var endLine is public := util.linenum
+
+        method childrenDo(anAction:Procedure1) { done }
+        method childrenMap(f:Function1) { [] }
+        method newAccept(aVisitor) { aVisitor.visitComment(self) }
 
         method end -> Position { line (endLine) column (util.lines.at(endLine).size) }
         method isComment { true }
