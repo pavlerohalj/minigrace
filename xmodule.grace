@@ -483,7 +483,7 @@ def typeVisitor = object {
     method visitTypeLiteral(lit) {
         for (lit.methods) do { meth ->
             var mtstr := "{literalCount} "
-            for (meth.signature) do { part ->
+            for (meth.signatureParts) do { part ->
                 mtstr := mtstr ++ part.name
                 if (part.params.size > 0) then {
                     mtstr := mtstr ++ "("
