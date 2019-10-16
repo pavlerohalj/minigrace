@@ -634,7 +634,7 @@ testSuite "sys" with {
     test "elapsedTime" by {
         def t0:Number = sys.elapsedTime
         def t1:Number = sys.elapsedTime
-        assert (t0 < 1) description "elapsedTime = {t0}"
+        assert (t0 < 2) description "elapsedTime = {t0}"
         assert ((t1 - t0) < 1) description "duration = {t1 - t0}"
     }
     test "execPath" by {
