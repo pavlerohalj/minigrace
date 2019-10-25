@@ -1,4 +1,5 @@
 dialect "none"
+import "intrinsic" as intrinsic
 
 method abstract {
     SubobjectResponsibility.raise "abstract method not overriden by subobject"
@@ -269,24 +270,53 @@ once method TypeSubtraction {
 // Now define the types.  Because some of the types are defined using &,
 // TypeIntersection must be defined first.
 
-type Extractable = {
-    extract
-}
+type None = intrinsic.None
 
-type Pattern = {
+type Pattern = Object & interface {
     & (other:Pattern) -> Pattern
     | (other:Pattern) -> Pattern
     matches(value:Object) -> Boolean
+    prefix ¬ -> Pattern
 }
 
-type ExceptionKind = Pattern & interface {
+type ExceptionKind = Pattern & EqualityObject & interface {
     refine (parentKind:ExceptionKind) -> ExceptionKind
     parent -> ExceptionKind
+    name -> String
     raise (message:String) -> Done
     raise (message:String) with (argument:Object) -> Done
 }
 
-type Point =  {
+type ExceptionPacket = Object & interface {
+    exception → ExceptionKind   // the exceptionKind that raised this exception.
+    message → String            // the message provided when this exception was raised.
+
+    data → Object               // the data object associated with this exception
+                                 // when it was raised, if there was one. Otherwise,
+                                 // the string "no data".
+
+    lineNumber → Number         // the source-code line of the raise request
+                                 //  that created this exception.
+
+    moduleName → String         // the name of the module containing the raise
+                                 // request that created this exception.
+
+    backtrace → List⟦String⟧
+    // a description of the call stack at the time that this exception was raised.
+    // backtrace.first is the initial execution environment; backtrace.last is the
+    // context that raised the exception.
+
+    printBacktrace → done       // writes a readable description of this
+                                // exceptionPacket and its backtrace to io.error
+
+    printBacktraceSkippingModules(skipable:Collection) → done
+                                // like printBacktrace, but omiting those stackframes
+                                // representing modules in skipable
+
+    reraise → intrinsic.None              // raise this exceptionPacket again
+}
+
+type Point =  EqualityObject & interface {
 
     x -> Number
     // the x-coordinates of self
@@ -330,8 +360,10 @@ type Point =  {
     norm -> Point
     // the unit vector (vecor of length 1) in same direction as self
 
-    hash -> Number
-    // the hash of self
+    reverseTimesNumber(_) → Point       // for double-dispatch
+    reverseDivideNumber(_) → Point
+    reversePlusNumber(_) → Point
+    reverseMinusNumber(_) → Point
 }
 
 class point2Dx (x') y (y') {
@@ -415,21 +447,21 @@ trait identityEquality {
 
 // New names for Blocks: FunctionN == BlockN
 
-type Function0⟦ResultT⟧  = interface {
+type Function0⟦ResultT⟧  = Object & interface {
     apply -> ResultT     // Function with no arguments and a result of type ResultT
     //  matches -> Boolean   // answers true
 }
-type Function1⟦ArgT1, ResultT⟧ = interface {
+type Function1⟦ArgT1, ResultT⟧ = Object & interface {
     apply(a1:ArgT1) -> ResultT    // Function with argument a1 of type ArgT1, and a result of type ResultT
     matches(a1:Object) -> Boolean   // answers true if a1 <: ArgT1
 }
-type Function2⟦ArgT1, ArgT2, ResultT⟧ = interface {
+type Function2⟦ArgT1, ArgT2, ResultT⟧ = Object & interface {
     apply(a1:ArgT1, a2:ArgT2) -> ResultT
     // Function with arguments of types ArgT1 and ArgT2, and a result of type ResultT
     matches(a1:Object, a2:Object) -> Boolean
         // answers true if a1 <: ArgT1 and a2 <: ArgT2
 }
-type Function3⟦ArgT1, ArgT2, ArgT3, ResultT⟧  = interface {
+type Function3⟦ArgT1, ArgT2, ArgT3, ResultT⟧  = Object & interface {
     apply(a1:ArgT1, a2:ArgT2, a3:ArgT3) -> ResultT
     matches(a1:Object, a2:Object, a3:Object) -> Boolean
         // answers true if a1 <: ArgT1 and a2 <: ArgT2 and a3 :< ArgT3

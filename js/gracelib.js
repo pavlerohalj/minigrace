@@ -1770,6 +1770,71 @@ GraceType.prototype = {
 
 GraceType.prototype.methods["setName(1)"].confidential = true;
 
+
+const type_None = {
+    name: 'None',
+    // typeMethods: // an infinite set
+    // matchCache: [], // not needed?
+    methods: {
+        "isMe(1)":          object_isMe,
+        "myIdentityHash":   object_identityHash,
+        "≠(1)":             object_notEquals,
+        "basicAsString":    object_basicAsString,
+        "debug$Iterator":   object_debugIterator,
+        "::(1)":            object_colonColon,
+        "matches(1)": function none_match (argcv, object) {
+            return GraceFalse;
+        },
+        "|(1)": function none_or(argcv, other) {
+            return other;
+        },
+        "&(1)": function none_and(argcv, other) {
+            return this;
+        },
+        "prefix¬": function(argcv) {
+            return type_Done;
+        },
+        "+(1)": function none_and(argcv, other) {
+            return other;
+        },
+        "-(1)": function none_and(argcv, other) {
+            throw new GraceExceptionPacket(RequestErrorObject,
+                   new GraceString("can't subtract methods from type " + this.name));
+        },
+        "asString": function none_asString (argcv) {
+            return new GraceString("type None");
+        },
+        "asDebugString": function none_asDebugString (argcv) {
+            return new GraceString("intrinsic type None");
+        },
+        "methodNames": function none_methodNames (argcv) {
+            throw new GraceExceptionPacket(RequestErrorObject,
+                    new GraceString("can't get the methods of type " + this.name +
+                            " because they form an infinite set"));
+        },
+        "==(1)": function none_identity (argcv, other) {
+            return selfRequest(this, "isMe(1)", argcv, other)
+        },
+        "hash": function none_hash (argcv) {
+            return selfRequest(this, "myIdentityHash", argcv)
+        },
+        "setName(1)": function none_setName (argcv, nu) {
+            throw new GraceExceptionPacket(RequestErrorObject,
+                new GraceString("attempting to change the name of type " +
+                        this.name + " to " + nu));
+        },
+        "name": function none_name (argcv) {
+            return new GraceString(this.name);
+        }
+    },
+    className: "NoneType",
+    definitionModule: "basic library",
+    definitionLine: 0,
+    classUid: "None-intrinsic"
+};
+
+type_None.methods["setName(1)"].confidential = true;
+
 function GraceBlock(recvr, lineNum, numParams) {
     this.definitionModule = recvr.definitionModule;
     this.definitionLine = lineNum;
@@ -2926,7 +2991,7 @@ GraceExceptionPacket.prototype = {
                 prefix = rf;
             }
         },
-        "printBacktraceSkippingModules": function(argcv, skipable) {
+        "printBacktraceSkippingModules(1)": function(argcv, skipable) {
             var exceptionName = callmethod(callmethod(this, "exception", [0]), "asString", [0]);
             var ln = callmethod(this, "lineNumber", [0]);
             var mn = callmethod(this, "moduleName", [0]);
@@ -2970,7 +3035,9 @@ GraceExceptionPacket.prototype = {
         }
     },
     exctype: 'graceexception',
-    get moduleName() { return this.method.definitionModule || "native code"; }
+    get moduleName() { return this.method.definitionModule || "native code"; },
+    definitionLine: 0,
+    classUid: "ExceptionPacket-intrinsic"
 };
 
 function GraceException(name, parent) {
@@ -3017,6 +3084,18 @@ GraceException.prototype = {
             if (o.className !== 'Exception') return GraceFalse;
             if (o.name !== this.name) return GraceFalse;
             return callmethod(this.parent, "==(1)", [1], o.parent);
+        },
+        "hash": function exception_hash(argcv) {
+            if (! this._hash) {
+                var hc = 47;
+                for (let i=0; i<this.name.length; i++) {
+                    hc *= 29;
+                    hc += this.name.charCodeAt(i);
+                    hc = hc & hc;
+                }
+                this._hash = new GraceNum(Math.abs(hc));
+            }
+            return this._hash;
         },
         "&(1)": function(argcv, o) {
             return new GraceAndPattern(this, o);
@@ -3558,6 +3637,7 @@ if (typeof global !== "undefined") {
     global.tryCatch = tryCatch;
     global.type_Boolean = type_Boolean;
     global.type_Done = type_Done;
+    global.type_None = type_None;
     global.type_Number = type_Number;
     global.type_Object = type_Object;
     global.type_String = type_String;
