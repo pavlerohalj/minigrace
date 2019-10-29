@@ -1185,6 +1185,22 @@ method buildSymbolTableFor(topNode) ancestors(topChain) {
     }
 
     topNode.accept(symbolTableVis) from(topChain)
+    if (util.target == "scopes") then {
+        util.outprint "====================================="
+        util.outprint "module with scopes (without reuse)"
+        util.outprint "====================================="
+        util.outprint "top-level"
+        util.outprint "Universal scope = {universalScope.asDebugString}"
+        topNode.scope.withSurroundingScopesDo { each ->
+            util.outprint (each.asString)
+            util.outprint (each.elementScopesAsString)
+            util.outprint "----------------"
+        }
+        util.outprint(topNode.pretty(0))
+        util.log_verbose "done"
+        util.outfile.close
+        sys.exit(0)
+    }
     topNode.accept(objectScopesVis) from(topChain)
     topNode.accept(inheritanceVis) from(topChain)
 }

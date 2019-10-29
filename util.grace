@@ -26,7 +26,7 @@ var commandLineExtensions is readable := ""
 
 
 def targets = set.withAll [
-    "lex", "parse", "grace", "ast", "processed-ast", "symbols", "imports", "js"
+    "lex", "parse", "grace", "ast", "processed-ast", "symbols", "imports", "js", "scopes"
 ]
 
 def requiredModules is public = object {
@@ -170,6 +170,7 @@ method parseargs(buildinfo) {
             case { "processed-ast" -> io.open(outDir ++ modnamev ++ ".ast", "w") }
             case { "ast" -> io.open(outDir ++ modnamev ++ ".ast", "w") }
             case { "symbols" -> io.open(outDir ++ modnamev ++ ".symbols", "w") }
+            case { "scopes" -> io.open(outDir ++ modnamev ++ ".scopes", "w") }
             case { "grace" -> io.open(outDir ++ modnamev ++ "_new.grace", "w") }
             case { "imports" -> io.output }
             else { startupFailure "unrecognized target '{targetv}'." }
