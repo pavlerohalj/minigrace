@@ -184,8 +184,7 @@ MiniGrace.prototype.trapErrors = function(func) {
             throw e;
         }
     } finally {
-        if (Grace_prelude.methods["while(1)do(1)"])
-            Grace_prelude.methods["while(1)do(1)"].safe = false;
+        minigrace.breakLoops = false;
     }
 };
 
@@ -196,9 +195,6 @@ MiniGrace.prototype.run = function() {
     moduleName = this.modname;
     eval(minigrace.generated_output);   // defines a global gracecode_‹moduleName›
     var theModuleFunc = window[graceModuleName(this.modname)];
-    testpass = false;    // not used anywhere else ?
-    if (Grace_prelude.methods["while(1)do(1)"])
-        Grace_prelude.methods["while(1)do(1)"].safe = this.breakLoops;
     this.trapErrors(function() {
         if(document.getElementById("debugtoggle").checked) {
             GraceDebugger.cache.start();
