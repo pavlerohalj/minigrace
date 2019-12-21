@@ -14,9 +14,8 @@ DIALECTS_NEED = modules/dialect util ast modules/gUnit
 WEB_DIRECTORY ?= public_html/ide/
 DEV_WEB_DIRECTORY = public_html/dev/ide/
 JSONLY = $(OBJECTDRAW) turtle.grace logo.grace
-J1-MINIGRACE = $(JS-KG) npm-sha j1/compiler.js j1/compiler-js $(JSRUNNERS:%=j1/%) $(JSJSFILES:%.js=j1/%.js) $(MGSOURCEFILES:%.grace=j1/%.js) j1/gracelib.js
-# the last two files are needed while changing to the new prelude regime
-J2-MINIGRACE = $(J1-MINIGRACE) j2/compiler.js $(JSRUNNERS:%=j2/%) $(JSJSFILES:%.js=j2/%.js) $(MGSOURCEFILES:%.grace=j2/%.js) j2/gracelib.js genjs.grace
+J1-MINIGRACE = $(sort $(JS-KG) npm-sha $(JSRUNNERS:%=j1/%) $(JSJSFILES:%.js=j1/%.js) $(MGSOURCEFILES:%.grace=j1/%.js))
+J2-MINIGRACE = $(sort $(J1-MINIGRACE) $(JSRUNNERS:%=j2/%) $(JSJSFILES:%.js=j2/%.js) $(MGSOURCEFILES:%.grace=j2/%.js) genjs.grace)
 JSJSFILES = gracelib.js unicodedata.js
 JSRUNNERS_WITHOUT_COMPILER = grace grace-debug minigrace-js minigrace-inspect
 JSRUNNERS = $(JSRUNNERS_WITHOUT_COMPILER) compiler-js
@@ -133,6 +132,8 @@ echo:
 	@echo OFFLINE = $(OFFLINE)
 	@echo MAKEFLAGS = $(MAKEFLAGS)
 	@echo JS-KG = $(JS-KG)
+	@echo J1-MINIGRACE = $(J1-MINIGRACE)
+	@echo J2-MINIGRACE = $(J2-MINIGRACE)
 	@echo MGSOURCEFILES = $(MGSOURCEFILES) "\n"
 	@echo SOURCEFILES = $(SOURCEFILES) "\n"
 	@echo WEBFILES = $(WEBFILES) "\n"
@@ -201,9 +202,9 @@ install: minigrace $(COMPILER_MODULES:%.grace=j2/%.js) js/grace js/grace-debug $
 	@./tools/warnAbout PATH $(PREFIX)/bin
 	@./tools/warnAbout GRACE_MODULE_PATH $(MODULE_PATH)
 
-$(JSJSFILES:%.js=j1/%.js): j1/%.js: $(JS-KG)/%.js
-# The j1/*.js files are used to run the j1 compiler, and so need to be
-# consistent with the code generated from the known-good compiler.
+$(JSJSFILES:%.js=j1/%.js): j1/%.js: js/%.js
+# The j1/*.js files are used to run the j1 compiler, and so need to be consistent
+# with the current source, and the code generated from the known-good compiler.
 	cp -p $< $@
 
 j1-minigrace: $(J1-MINIGRACE)
@@ -401,7 +402,7 @@ test.compile: minigrace
 $(TYPE_DIALECTS:%=js/%.js): js/%.js: $(DIALECTS_NEED:%=%.js) $(patsubst modules/%, js/%.js, $(filter modules/%,$(DIALECTS_NEED)))
 
 test: minigrace.env js/tests/gracelib.js
-# is TESTS is underfined, runs all tests.  Otherwise, TESTS should be set to a
+# if TESTS is underfined, runs all tests.  Otherwise, TESTS should be set to a
 # space-separated sequence of test-name prefixes, e.g., "TESTS=t001 t027 t041"
 	js/tests/harness-js j2/minigrace-js js/tests "" $(TESTS)
 
