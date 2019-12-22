@@ -85,7 +85,7 @@ clean:
 	rm -f *.gcn *.gct
 	rm -rf *.gso *.gso.dSYM */*.gso.dSYM */*/*.gso.dSYM
 	rm -f stdin_minigrace.c
-	rm -f minigrace-dynamic
+	rm -f js/minigrace-inspect js/grace-debug
 	rm -f $(SOURCEFILES:%.grace=%)
 	rm -f $(OBJECTDRAW:%.grace=%.*)
 	rm -f $(OBJECTDRAW:%.grace=modules/%.*)
@@ -243,7 +243,7 @@ js/grace: js/grace.in
 	sed -e "s|@MODULE_PATH@|$(MODULE_PATH)/|" $< > js/grace
 	chmod a+x js/grace
 
-js/grace-debug: js/grace
+js/grace-debug: js/grace Makefile
 	sed -e "s|#!/usr/bin/env node|#!`which node`  --inspect-brk|" $< > $@
 	chmod a+x js/grace-debug
 
@@ -264,7 +264,7 @@ js/minigrace.js: js/minigrace.in.js buildinfo.grace
 	@echo "MiniGrace.version = '$$(tools/calculate-version HEAD)';" >> js/minigrace.js
 	@echo "MiniGrace.revision = '$$(git rev-parse HEAD|cut -b1-7)';" >> js/minigrace.js
 
-js/minigrace-inspect: js/minigrace-js
+js/minigrace-inspect: js/minigrace-js Makefile
 	sed -e "s|node|node --inspect-brk|" $< > $@
 	chmod a+x $@
 
@@ -312,7 +312,7 @@ $(JS-KG)/gracelib.js: $(JS-KG)
 $(JS-KG)/unicodedata.js: $(JS-KG)
 $(JS-KG)/minigrace-js: $(JS-KG)
 
-$(JS-KG)/minigrace-inspect: $(JS-KG)/minigrace-js
+$(JS-KG)/minigrace-inspect: $(JS-KG)/minigrace-js Makefile
 	sed "s|node|node --inspect-brk|" $< > $@
 
 js/ace/mode-grace.js: pull-web-editor grace-web-editor/scripts/ace/mode-grace.js
