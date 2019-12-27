@@ -209,7 +209,7 @@ $(JSJSFILES:%.js=j1/%.js): j1/%.js: js/%.js
 
 j1-minigrace: $(J1-MINIGRACE)
 
-j1/compiler-js: $(JS-KG)/compiler-js
+j1/compiler-js: js/compiler-js Makefile
 	cp -p $< $@
 
 j2/buildinfo.grace: buildinfo.grace

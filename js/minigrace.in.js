@@ -193,6 +193,7 @@ MiniGrace.prototype.run = function() {
     stackFrames = [];
     lineNumber = 1;
     moduleName = this.modname;
+    minigrace.initialModule = moduleName;
     eval(minigrace.generated_output);   // defines a global gracecode_‹moduleName›
     var theModuleFunc = window[graceModuleName(this.modname)];
     this.trapErrors(function() {
