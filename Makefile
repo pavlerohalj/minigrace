@@ -14,10 +14,12 @@ DIALECTS_NEED = modules/dialect util ast modules/gUnit
 WEB_DIRECTORY ?= public_html/ide/
 DEV_WEB_DIRECTORY = public_html/dev/ide/
 JSONLY = $(OBJECTDRAW) turtle.grace logo.grace
-J1-MINIGRACE = $(sort $(JS-KG) npm-sha $(JSRUNNERS:%=j1/%) $(JSJSFILES:%.js=j1/%.js) $(MGSOURCEFILES:%.grace=j1/%.js))
-J2-MINIGRACE = $(sort $(J1-MINIGRACE) $(JSRUNNERS:%=j2/%) $(JSJSFILES:%.js=j2/%.js) $(MGSOURCEFILES:%.grace=j2/%.js) genjs.grace)
+J1-MINIGRACE = $(sort $(filter-out $(JSINSPECTORS:%=j1/%), $(JS-KG) npm-sha $(JSRUNNERS:%=j1/%) $(JSJSFILES:%.js=j1/%.js) $(MGSOURCEFILES:%.grace=j1/%.js)))
+J2-MINIGRACE = $(sort $(filter-out $(JSINSPECTORS:%=j2/%), $(J1-MINIGRACE) $(JSRUNNERS:%=j2/%) $(JSJSFILES:%.js=j2/%.js) $(MGSOURCEFILES:%.grace=j2/%.js) genjs.grace))
 JSJSFILES = gracelib.js unicodedata.js
-JSRUNNERS_WITHOUT_COMPILER = grace grace-debug minigrace-js minigrace-inspect
+JSRUNNERS_BASE = grace minigrace-js
+JSINSPECTORS = grace-inspect minigrace-inspect
+JSRUNNERS_WITHOUT_COMPILER = $(JSRUNNERS_BASE) $(JSINSPECTORS)
 JSRUNNERS = $(JSRUNNERS_WITHOUT_COMPILER) compiler-js
 JS-KG = js-kg/$(NPM_STABLE_VERSION)
 OBJECTDRAW = objectdraw.grace rtobjectdraw.grace stobjectdraw.grace animation.grace objectdrawBundle.grace
@@ -42,7 +44,7 @@ WEBFILES_SIMPLE = $(filter-out js-simple/sample,$(sort js-simple/index.html js-s
 WEB_GRAPHICS_MODULES = modules/turtle.grace modules/logo.grace
 
 # The next few rules are here for their side effects: updating
-# buildinfo.grace if necessary, and creating directories.
+# j[12]/buildinfo.grace if necessary, and creating directories.
 
 CREATE_J1 := $(shell if [ ! -e j1 ] ; then mkdir -p j1 ; fi)
 CREATE_J2 := $(shell if [ ! -e j2 ] ; then mkdir -p j2 ; fi)
@@ -52,7 +54,7 @@ all: minigrace.env ideBuild
 
 alltest: test module.test self.test
 
-.PHONY: ace-code all alltests blackWeb bruceWeb c checkjs checkgenjs clean dialects dev-ide dev-ideDeploy echo ide ideBuild ideDeploy fullclean install j1-minigrace j2-minigrace just-minigrace minigrace.env pull-web-editor pull-objectdraw self.test samples sample-% test test.compile uninstall
+.PHONY: ace-code all alltests blackWeb bruceWeb c checkjs checkgenjs clean dialects dev-ide dev-ideDeploy echo ide ideBuild ideDeploy fullclean install j1-minigrace j2-minigrace libraries minigrace.env pull-web-editor pull-objectdraw self.test samples sample-% test test.compile uninstall
 
 # clear out the default rules: produces far less --debug output
 .SUFFIXES:
@@ -85,7 +87,7 @@ clean:
 	rm -f *.gcn *.gct
 	rm -rf *.gso *.gso.dSYM */*.gso.dSYM */*/*.gso.dSYM
 	rm -f stdin_minigrace.c
-	rm -f js/minigrace-inspect js/grace-debug
+	rm -f js/minigrace-inspect js/grace-debug js/grace-inspect
 	rm -f $(SOURCEFILES:%.grace=%)
 	rm -f $(OBJECTDRAW:%.grace=%.*)
 	rm -f $(OBJECTDRAW:%.grace=modules/%.*)
@@ -155,7 +157,7 @@ fullclean: clean
 	rm -rf $$(ls -d js-kg/* | grep -v $(NPM_STABLE_VERSION))
 	rm -rf npm-build-dir
 
-fulltest: gencheck clean minigrace.env self.test test module-test
+fulltest: gencheck clean minigrace.env self.test test module.test
 
 gencheck:
 	X=$$(tools/git-calculate-generation) ; mv .git-generation-cache .git-generation-cache.$$$$ ; Y=$$(tools/git-calculate-generation) ; [ "$$X" = "$$Y" ] || exit 1 ; rm -rf .git-generation-cache ; mv .git-generation-cache.$$$$ .git-generation-cache
@@ -188,14 +190,14 @@ ideDeploy: ideBuild
 	@[ -n "$(WEB_SERVER)" ] || { echo "Please set the WEB_SERVER variable to something like user@hostname" && false; }
 	rsync -az --delete --exclude .git grace-web-editor/ $(WEB_SERVER):$(WEB_DIRECTORY)
 
-install: minigrace $(COMPILER_MODULES:%.grace=j2/%.js) js/grace js/grace-debug $(LIBRARY_MODULES:%.grace=j2/%.js) js/mgc
+install: minigrace $(COMPILER_MODULES:%.grace=j2/%.js) js/grace js/grace-inspect $(LIBRARY_MODULES:%.grace=j2/%.js) js/mgc
 	@if touch $(PREFIX)/bin/touched ; then rm -f $(PREFIX)/bin/touched ; else echo "Can't write to $(PREFIX)/bin/; set PREFIX to install somewhere else." ; exit 1 ; fi
 	test -d $(PREFIX)/bin || install -d $(PREFIX)/bin
 	cd $(PREFIX)/bin && (npm ls sha > /dev/null || npm install sha)
 	test -d $(MODULE_PATH) || install -d $(MODULE_PATH)
 	test -d $(OBJECT_PATH)  || install -d $(OBJECT_PATH)
 	test -d $(INCLUDE_PATH) || install -d $(INCLUDE_PATH)
-	install -p -m 755 js/mgc js/grace js/grace-debug js/unicodedata.js $(PREFIX)/bin/
+	install -p -m 755 js/mgc js/grace js/grace-inspect js/unicodedata.js $(PREFIX)/bin/
 	install -p -m 755 js/gracelib.js js/unicodedata.js $(MODULE_PATH)
 	install -p -m 644 $(COMPILER_MODULES) $(COMPILER_MODULES:%.grace=j2/%.js) $(MODULE_PATH)
 	install -p -m 644 $(PRELUDESOURCEFILES) $(PRELUDESOURCEFILES:%.grace=j2/%.js) $(LIBRARY_MODULES:%.grace=modules/%.grace) $(LIBRARY_MODULES:%.grace=j2/%.js) $(MODULE_PATH)
@@ -207,15 +209,24 @@ $(JSJSFILES:%.js=j1/%.js): j1/%.js: js/%.js
 # with the current source, and the code generated from the known-good compiler.
 	cp -p $< $@
 
-j1-minigrace: $(J1-MINIGRACE)
+j1-minigrace: $(J1-MINIGRACE) $(JSINSPECTORS:%=j1/%)
 
 j1/compiler-js: js/compiler-js Makefile
 	cp -p $< $@
 
+j1/grace-inspect: j1/grace tools/make-grace-inspect
+	tools/make-grace-inspect $< $@
+
+j1/minigrace-inspect: j1/minigrace-js tools/make-minigrace-inspect
+	tools/make-minigrace-inspect $< $@
+
+j1/buildinfo.js: j1/buildinfo.grace
+	GRACE_MODULE_PATH=modules:. $(JS-KG)/minigrace-js $(VERBOSITY) --make --dir j1 $<
+
 j2/buildinfo.grace: buildinfo.grace
 	cp -p $< $@
 
-j2-minigrace: $(J2-MINIGRACE)
+j2-minigrace: $(J2-MINIGRACE) $(JSINSPECTORS:%=j2/%)
 
 $(JSJSFILES:%.js=j2/%.js): j2/%.js: js/%.js
 	cp -p $< $@
@@ -223,14 +234,14 @@ $(JSJSFILES:%.js=j2/%.js): j2/%.js: js/%.js
 $(JSONLY:%.grace=js/%.js): js/%.js: modules/%.grace minigrace
 	GRACE_MODULE_PATH=js:modules ./minigrace --dir js --make $(VERBOSITY) $<
 
-$(JSRUNNERS_WITHOUT_COMPILER:%=j1/%): j1/%: $(JS-KG)/%
+$(JSRUNNERS_BASE:%=j1/%): j1/%: $(JS-KG)/%
 # The j1/*.js files are created by the kg compiler, and so need
 # to be run with the kg runners and libraries.
 	cp -p $< $@
 
 $(JSRUNNERS:%=j2/%): j2/%: js/%
 	cp -p $< $@
-	chmod a+x $@
+	chmod a+x-w $@
 
 js/ace/ace.js:
 	curl https://raw.githubusercontent.com/ajaxorg/ace-builds/master/src-min/ace.js > js/ace/ace.js
@@ -239,13 +250,11 @@ js/index.html: js/index.in.html js/ace js/minigrace.js js/tests
 	@echo Generating index.html from index.in.html...
 	@awk '!/<!--\[!SH\[/ { print } /<!--\[!SH\[/ { gsub(/<!--\[!SH\[/, "") ; gsub(/\]!\]-->/, "") ; system($$0) }' $< > $@
 
-js/grace: js/grace.in
-	sed -e "s|@MODULE_PATH@|$(MODULE_PATH)/|" $< > js/grace
-	chmod a+x js/grace
+js/grace: js/grace.in tools/make-grace
+	tools/make-grace $(MODULE_PATH) $< $@
 
-js/grace-debug: js/grace Makefile
-	sed -e "s|#!/usr/bin/env node|#!`which node`  --inspect-brk|" $< > $@
-	chmod a+x js/grace-debug
+js/grace-inspect: js/grace tools/make-grace-inspect
+	tools/make-grace-inspect $< $@
 
 js/mgc: minigrace.env
 	rm -rf mgcTemp js/mgc
@@ -264,9 +273,8 @@ js/minigrace.js: js/minigrace.in.js buildinfo.grace
 	@echo "MiniGrace.version = '$$(tools/calculate-version HEAD)';" >> js/minigrace.js
 	@echo "MiniGrace.revision = '$$(git rev-parse HEAD|cut -b1-7)';" >> js/minigrace.js
 
-js/minigrace-inspect: js/minigrace-js Makefile
-	sed -e "s|node|node --inspect-brk|" $< > $@
-	chmod a+x $@
+js/minigrace-inspect: js/minigrace-js tools/make-minigrace-inspect
+	tools/make-minigrace-inspect $< $@
 
 js/tests/gracelib.js: js/gracelib.js
 	cp -p $< $@
@@ -277,11 +285,10 @@ $(LIBRARY_MODULES:%.grace=modules/%.js): modules/%.js: j2/%.js
 $(LIBRARY_MODULES:%.grace=j1/%.js): j1/%.js: modules/%.grace $(JS-KG)/minigrace-js
 	GRACE_MODULE_PATH=modules:. $(JS-KG)/minigrace-js $(VERBOSITY) --make --dir j1 $<
 
+libraries: $(OBJECTDRAW:%.grace=modules/%.grace) $(ALL_LIBRARY_MODULES:%.grace=j2/%.js)
+
 Makefile.conf: configure modules
 	./configure
-
-$(MGSOURCEFILES:%.grace=j1/%.js): j1/%.js: %.grace $(JS-KG)/minigrace-js
-	GRACE_MODULE_PATH=modules:. $(JS-KG)/minigrace-js $(VERBOSITY) --make --dir j1 $<
 
 $(MGSOURCEFILES:%.grace=j2/%.js): j2/%.js: %.grace $(J1-MINIGRACE)
 	GRACE_MODULE_PATH=modules:j1:. j1/minigrace-js $(VERBOSITY) --make --dir j2 $<
@@ -290,7 +297,8 @@ $(MGSOURCEFILES:%.grace=$(JS-KG)/%.js): $(JS-KG)
 
 minigrace: $(J2-MINIGRACE)
 
-minigrace.env: minigrace $(JSRUNNERS:%=j2/%) $(OBJECTDRAW:%.grace=modules/%.grace) $(ALL_LIBRARY_MODULES:%.grace=j2/%.js)
+minigrace.env: minigrace libraries
+#$(JSRUNNERS:%=j2/%)
 
 module.test: minigrace.env $(TYPE_DIALECTS:%=j2/%.js)
 	modules/tests/harness-js j2/minigrace-js modules/tests "" $(TESTS)
@@ -307,13 +315,13 @@ $(JS-KG):
 
 $(JS-KG)/compiler-js: $(JS-KG)
 $(JS-KG)/grace: $(JS-KG)
-$(JS-KG)/grace-debug: $(JS-KG)
+$(JS-KG)/grace-inspect: $(JS-KG)
 $(JS-KG)/gracelib.js: $(JS-KG)
 $(JS-KG)/unicodedata.js: $(JS-KG)
 $(JS-KG)/minigrace-js: $(JS-KG)
 
-$(JS-KG)/minigrace-inspect: $(JS-KG)/minigrace-js Makefile
-	sed "s|node|node --inspect-brk|" $< > $@
+$(JS-KG)/minigrace-inspect: $(JS-KG)/minigrace-js tools/make-minigrace-inspect
+	tools/make-minigrace-inspect $< $@
 
 js/ace/mode-grace.js: pull-web-editor grace-web-editor/scripts/ace/mode-grace.js
 	cp grace-web-editor/scripts/ace/mode-grace.js $@
@@ -323,7 +331,7 @@ npm-build: minigrace.env Makefile
 	rm -rf npm-build-dir/*
 	cp js/npm-package.json npm-build-dir/package.json
 	cp j2/*.js $(MGSOURCEFILES) $(ALL_LIBRARY_MODULES:%=modules/%) npm-build-dir/
-	cp js/minigrace-js js/compiler-js js/minigrace-inspect js/grace js/grace-debug npm-build-dir/
+	cp js/minigrace-js js/compiler-js js/minigrace-inspect js/grace js/grace-inspect npm-build-dir/
 	cp js/tests/t001*_test.grace npm-build-dir/quick_test.grace
 	cd npm-build-dir && npm version $(VERSION)
 
@@ -370,7 +378,7 @@ samples: js/sample-dialects
 
 self.test : PREAMBLE = $(if $(TRAVIS),,time )
 self.test : VERB = $(if $(VERBOSITY),$(VERBOSITY),--verbose)
-self.test: minigrace.env
+self.test: minigrace.env $(JSINSPECTORS:%=js/%)
 	rm -rf selftest
 	mkdir -p selftest
 	cd selftest && ln -sf ../js/unicodedata.js .
@@ -383,6 +391,9 @@ self.test: minigrace.env
 	@GRACE_MODULE_PATH=.:modules:js $(PREAMBLE)selftest/mgc $(VERB) --make --dir selftest compiler.grace && \
 	cp js/compiler-js js/minigrace-js js/minigrace-inspect js/gracelib.js js/tests/harness-js  $(PRELUDESOURCEFILES:%.grace=j2/%.js) selftest
 	$(PREAMBLE)selftest/harness-js selftest/minigrace-js js/tests ""
+
+$(SOURCEFILES:%.grace=j1/%.js): j1/%.js: %.grace $(JS-KG)/minigrace-js
+	GRACE_MODULE_PATH=modules:. $(JS-KG)/minigrace-js $(VERBOSITY) --make --dir j1 $<
 
 $(SOURCEFILES:%.grace=js/tests/%.js): js/tests/%.js: js/%.js
 	cd js/tests; ln -sf ../$(<F) .
