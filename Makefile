@@ -214,6 +214,16 @@ j1-minigrace: $(J1-MINIGRACE) $(JSINSPECTORS:%=j1/%)
 j1/compiler-js: js/compiler-js Makefile
 	cp -p $< $@
 
+j1/grace: js/grace
+# The js files created by the j1 compiler need
+# to be run with the current runners and libraries.
+	cp -p $< $@
+
+j1/minigrace-js: $(JS-KG)/minigrace-js
+# The j1/*.js files are created by the kg compiler, and so need
+# to be run with the kg runners and libraries.
+	cp -p $< $@
+
 j1/grace-inspect: j1/grace tools/make-grace-inspect
 	tools/make-grace-inspect $< $@
 
@@ -233,11 +243,6 @@ $(JSJSFILES:%.js=j2/%.js): j2/%.js: js/%.js
 
 $(JSONLY:%.grace=js/%.js): js/%.js: modules/%.grace minigrace
 	GRACE_MODULE_PATH=js:modules ./minigrace --dir js --make $(VERBOSITY) $<
-
-$(JSRUNNERS_BASE:%=j1/%): j1/%: $(JS-KG)/%
-# The j1/*.js files are created by the kg compiler, and so need
-# to be run with the kg runners and libraries.
-	cp -p $< $@
 
 $(JSRUNNERS:%=j2/%): j2/%: js/%
 	cp -p $< $@
