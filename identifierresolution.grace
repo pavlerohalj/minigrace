@@ -12,6 +12,7 @@ import "fastDict" as map
 import "errormessages" as errormessages
 import "identifierKinds" as k
 import "mirror" as mirror
+import "prefixTree" as pt
 
 def completed = singleton "completed"
 def inProgress = singleton "inProgress"
@@ -839,23 +840,36 @@ method generateGctForModule(module) {
     // The gct is essentially a representation of module's symbol table.
     // We built this representation by iterating over the symbol table.
     // Older versions of this method used to iterate over the ast,
-    // but reused methods are not in the ast, and so were omitted.
+    // but methods reused from imported modules are not in the ast!
+
+    // The tricky thing is to keep the size of the gct under control by
+    // including only the information that the compiler will need when importing
+    // this module.  In particular, complete lists of attribute methods are
+    // needed only for fresh methods, since only fresh methods can be reused.
+    // For the module itself, only public methods need be included, since
+    // confidential methods cannot be accessed from the outside (or even by
+    // dialectic programs).
+
 
     def gct = dictionary.empty
     def theDialect = module.theDialect.moduleName
-    def methodList = list.empty
+    def publicMethods = list.empty
+    def methodsOf = dictionary.empty
     def typeList = list.empty
     def ms = module.scope
     def pathsToProcess = list.empty
+    def freshPaths = pt.prefixTree.empty
     ms.types.keysAndValuesDo { typeName, typeDec ->
         gct.at "typedec-of:{typeName}" put [typeDec]
         typeList.add (typeName)
     }
 
     ms.keysAndKindsDo { vName, knd ->
-        if (knd.forGct) then {
-            methodList.add (vName ++ knd.tag)
+        if (knd.isFresh) then {
+            publicMethods.add (vName ++ knd.tag)
             pathsToProcess.add(vName)
+            freshPaths.add [vName]
+            util.log 45 verbose "{[vName]} added to freshPaths"
         }
     }
     while { pathsToProcess.isEmpty.not } do {
@@ -869,17 +883,26 @@ method generateGctForModule(module) {
             if (subKnd.forGct) then {
                 subList.add (subName ++ subKnd.tag)
                 pathsToProcess.addLast "{vName}.{subName}"
+                if (subKnd.isFresh) then {
+                    freshPaths.add ((vName.split ".") ++ [ subName ])
+                    util.log 45 verbose "{(vName.split ".") ++ [ subName ]} added to freshPaths"
+                }
             }
         }
         if (subList.isEmpty.not) then {
-            gct.at "methods-of:{vName}" put (subList.sort)
+            methodsOf.at (vName) put (subList.sort)
         }
         vNameScope.types.keysAndValuesDo { tName, tDec ->
             gct.at "typedec-of:{vName}.{tName}" put [tDec]
             typeList.add "{vName}.{tName}"
         }
     }
-    gct.at "methods" put (methodList.sort)
+    methodsOf.keysAndValuesDo { key, value ->
+        if (freshPaths.contains(key.split ".")) then {
+            gct.at "methods-of:{key}" put (value)
+        }
+    }
+    gct.at "public" put (publicMethods.sort)
     gct.at "types" put (typeList.sort)
     gct.at "modules" put (xmodule.externalModules.keys.sorted)
     gct.at "methodTypes" put (ms.methodTypes.values.sorted)
@@ -933,7 +956,7 @@ method processGct(gct, importedModuleScope) {
 
     def moduleName = (ast.withoutLeadingComponents (gct.at "path".first)).
             replace ".grace" with ""
-    def moduleMethods = gct.at "methods" ifAbsent { [] } >> set
+    def moduleMethods = gct.at "public" ifAbsent { [] } >> set
     moduleMethods.do { meth ->
         addMethod (meth) toScope (importedModuleScope)
     }
